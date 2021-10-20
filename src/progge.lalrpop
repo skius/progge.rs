@@ -1,0 +1,176 @@
+use std::str::FromStr;
+use proggers::ast::*;
+
+grammar(src: &str);
+
+WithLoc<T>: WithLoc<T> = {
+    <start:@L> <elem:T> => WithLoc { elem: elem, loc: loc_from_offset(src, start) },
+}
+
+Comma<T>: Vec<T> = {
+    <mut v:(<T> ",")*> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            v.push(e);
+            v
+        }
+    }
+};
+
+// Left-assoc
+TierL<Op,NextTier>: Expr = {
+    <left:WithLoc<TierL<Op,NextTier>>> <op:Op> <right:WithLoc<NextTier>> => Expr::BinOp(op, Box::new(left), Box::new(right)),
+    NextTier => <>
+};
+
+pub ProgramL = WithLoc<Program>;
+pub Program: Program = {
+    <fns: FuncDefL*> => Program(fns),
+}
+
+pub FuncDefL = WithLoc<FuncDef>;
+pub FuncDef: FuncDef = {
+    "fn" <name:NameL> "(" <params:Comma<Param>> ")" "{"
+        <body:BlockL>
+    "}" => FuncDef { name:name, params: params, body: body },
+}
+
+Param: (WithLoc<Var>, WithLoc<Type>) = {
+    <name:VarL> ":" <typ:TypeL> => (name, typ),
+}
+
+pub BlockL = WithLoc<Block>;
+pub Block: Block = {
+    (<StmtL> ";")* => {
+        // println!("{:?} {:?}", start, end);
+        // println!("{:?}", src);
+        Block(<>)
+    },
+}
+
+// EmptyBlockL = WithLoc<EmptyBlock>;
+// EmptyBlock: Block = {
+//      => Block(vec![]),
+// }
+
+pub StmtL = WithLoc<Stmt>;
+pub Stmt: Stmt = {
+    "testcase!" => Stmt::Testcase(),
+    "unreachable!" => Stmt::Unreachable(),
+    "return" <e:ExprL> => Stmt::Return(e),
+    "var" <v:VarL> "=" <e:ExprL> => Stmt::Decl(v, e),
+    <v:VarL> "=" <e:ExprL> => Stmt::Assn(v, e),
+    "if" <e:ExprL> "{"
+        <if_b:BlockL>
+    "}" <empty_else:@L> => Stmt::IfElse { cond: e, if_branch: if_b, else_branch:
+        WithLoc { elem: Block(vec![]), loc: loc_from_offset(src, empty_else) },
+    },
+    "if" <e:ExprL> "{"
+        <if_b:BlockL>
+    "}" "else" "{"
+        <else_b:BlockL>
+    "}" => Stmt::IfElse { cond: e, if_branch: if_b, else_branch: else_b },
+    "while" <e:ExprL> "{"
+        <b:BlockL>
+    "}" => Stmt::While { cond: e, block: b },
+}
+
+ExprL = {
+    BExpr0L,
+}
+
+// ||
+BExpr0L = WithLoc<BExpr0>;
+BExpr0 = TierL<BExpr0OpL, BExpr1>;
+// &&
+BExpr1L = WithLoc<BExpr1>;
+BExpr1 = TierL<BExpr1OpL, BExpr2>;
+// == !=
+BExpr2L = WithLoc<BExpr2>;
+BExpr2 = TierL<BExpr2OpL, BExpr3>;
+// < <= > >=
+BExpr3L = WithLoc<BExpr3>;
+BExpr3 = TierL<RopcodeL, IExpr0>;
+
+// + -
+IExpr0L = WithLoc<IExpr0>;
+IExpr0 = TierL<IExpr0OpL, IExpr1>;
+// * % /
+IExpr1L = WithLoc<IExpr1>;
+IExpr1 = TierL<IExpr1OpL, LeafExpr>;
+
+LeafExprL = WithLoc<LeafExpr>;
+LeafExpr: Expr = {
+    Int => Expr::IntLit(<>),
+    "true" => Expr::BoolLit(true),
+    "false" => Expr::BoolLit(false),
+    <n:NameL> "(" <args:Comma<ExprL>> ")" => Expr::Call(n, args),
+    <v:VarL> => Expr::Var(v),
+    <op:IUnOpL> <e:LeafExprL> => Expr::UnOp(op, Box::new(e)),
+    <op:BUnOpL> <e:LeafExprL> => Expr::UnOp(op, Box::new(e)),
+    "(" <BExpr0> ")" => <>,
+
+}
+
+BExpr0OpL = WithLoc<BExpr0Op>;
+BExpr0Op: BinOpcode = {
+    "||" => BinOpcode::Or,
+}
+
+BExpr1OpL = WithLoc<BExpr1Op>;
+BExpr1Op: BinOpcode = {
+    "&&" => BinOpcode::And,
+}
+
+BExpr2OpL = WithLoc<BExpr2Op>;
+BExpr2Op: BinOpcode = {
+    "==" => BinOpcode::Eq,
+    "!=" => BinOpcode::Ne,
+}
+
+BUnOpL = WithLoc<BUnOp>;
+BUnOp: UnOpcode = {
+    "!" => UnOpcode::Not,
+}
+
+RopcodeL = WithLoc<Ropcode>;
+Ropcode: BinOpcode = {
+    "<" => BinOpcode::Lt,
+    "<=" => BinOpcode::Le,
+    ">" => BinOpcode::Gt,
+    ">=" => BinOpcode::Ge,
+}
+
+IExpr0OpL = WithLoc<IExpr0Op>;
+IExpr0Op: BinOpcode = {
+    "+" => BinOpcode::Add,
+    "-" => BinOpcode::Sub,
+}
+
+IExpr1OpL = WithLoc<IExpr1Op>;
+IExpr1Op: BinOpcode = {
+    "*" => BinOpcode::Mul,
+    "/" => BinOpcode::Div,
+    "%" => BinOpcode::Mod,
+}
+
+IUnOpL = WithLoc<IUnOp>;
+IUnOp: UnOpcode = {
+    "-" => UnOpcode::Neg,
+}
+
+TypeL = WithLoc<Type>;
+Type: Type = {
+    "int" => Type::Int,
+    "bool" => Type::Bool,
+}
+
+VarL: WithLoc<Var> = {
+    <name:WithLoc<Name>> => WithLoc { elem: Var(name.elem), loc: name.loc },
+}
+
+NameL = WithLoc<Name>;
+Name: String = r"[A-Za-z_][A-Za-z0-9_]*" => (<>).to_owned();
+
+IntL = WithLoc<Int>;
+Int: i64 = r"[0-9]+" => i64::from_str(<>).unwrap();

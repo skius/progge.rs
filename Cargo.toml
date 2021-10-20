@@ -1,0 +1,19 @@
+[package]
+name = "proggers"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "proggers"
+path = "src/progge.rs"
+
+[build-dependencies]
+lalrpop = "0.19.6"
+
+[dependencies]
+elina = { git = "https://github.com/skius/elina-rs" }
+lalrpop-util = "0.19.6"
+regex = "1"
+

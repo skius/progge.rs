@@ -1,0 +1,8 @@
+fn main(x: int) {
+    var x = !x < 3 || false && true - 222;
+    x = ex(ex(2));
+}
+
+fn ex() {
+
+}
