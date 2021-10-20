@@ -33,6 +33,7 @@ impl Deref for Program {
 pub struct FuncDef {
     pub name: WithLoc<String>,
     pub params: Vec<(WithLoc<Var>, WithLoc<Type>)>,
+    pub retty: WithLoc<Type>,
     pub body: WithLoc<Block>,
 }
 
@@ -130,6 +131,7 @@ pub enum UnOpcode {
 pub enum Type {
     Int,
     Bool,
+    Unit,
 }
 #[derive(Debug, Clone)]
 pub struct Var(pub String);
@@ -142,7 +144,7 @@ impl Deref for Var {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Loc {
     pub line: usize,
     pub col: usize,

@@ -30,9 +30,12 @@ pub Program: Program = {
 
 pub FuncDefL = WithLoc<FuncDef>;
 pub FuncDef: FuncDef = {
-    "fn" <name:NameL> "(" <params:Comma<Param>> ")" "{"
+    "fn" <name:NameL> "(" <params:Comma<Param>> ")" <empty_retty_loc:@L> <retty:("->" <TypeL>)?> "{"
         <body:BlockL>
-    "}" => FuncDef { name:name, params: params, body: body },
+    "}" => FuncDef { name:name, params: params, retty: match retty {
+        Some(retty) => retty,
+        None => WithLoc { elem: Type::Unit, loc: loc_from_offset(src, empty_retty_loc) },
+    }, body: body },
 }
 
 Param: (WithLoc<Var>, WithLoc<Type>) = {
@@ -58,7 +61,7 @@ pub Stmt: Stmt = {
     "testcase!" => Stmt::Testcase(),
     "unreachable!" => Stmt::Unreachable(),
     "return" <e:ExprL> => Stmt::Return(e),
-    "var" <v:VarL> "=" <e:ExprL> => Stmt::Decl(v, e),
+    "let" <v:VarL> "=" <e:ExprL> => Stmt::Decl(v, e),
     <v:VarL> "=" <e:ExprL> => Stmt::Assn(v, e),
     "if" <e:ExprL> "{"
         <if_b:BlockL>
@@ -163,6 +166,7 @@ TypeL = WithLoc<Type>;
 Type: Type = {
     "int" => Type::Int,
     "bool" => Type::Bool,
+    "unit" => Type::Unit,
 }
 
 VarL: WithLoc<Var> = {

@@ -1,8 +1,8 @@
 fn main(x: int) {
-    var x = !x < 3 || false && true - 222;
-    x = ex(ex(2));
+    let x = !x < 3 || false && true - 222;
+    x = ex(ex(3 + 3));
 }
 
-fn ex() {
+fn ex(i: int) -> int {
 
 }
