@@ -103,6 +103,7 @@ impl Display for Block {
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
+    // TODO: add optional params to testcase and unreachable, i.e. to name it?
     Testcase(),
     Unreachable(),
     Return(WithLoc<Expr>),

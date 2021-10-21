@@ -1,6 +1,10 @@
 fn main(x: int) {
     let res = 0;
     if x < 100 {
+        testcase!;
+        if x > 100 {
+            unreachable!;
+        }
         res = 1000;
     }
     res = res;

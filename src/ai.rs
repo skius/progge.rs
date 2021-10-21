@@ -167,6 +167,9 @@ fn handle_irnode<M: Manager>(man: &M, env: &Environment, ir: &IRNode, state: &mu
             None
         }
         IRCBranch(cond) => {
+            // TODO: branch here based on "is cond deterministic/does cond only contain int variables"
+            // otherwise, meet with TOP for both branches, i.e. no-op
+
             let hcons = bool_expr_to_hcons(env, cond);
             let mut taken = state.clone();
             taken.meet(man, &hcons);
