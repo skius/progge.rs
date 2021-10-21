@@ -1,7 +1,7 @@
 [package]
 name = "proggers"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,6 +14,6 @@ lalrpop = "0.19.6"
 
 [dependencies]
 elina = { git = "https://github.com/skius/elina-rs" }
-lalrpop-util = "0.19.6"
+lalrpop-util = { version = "0.19.6", features = ["lexer", "regex"] }
 regex = "1"
 petgraph = "0.6.0"
