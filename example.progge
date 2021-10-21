@@ -7,7 +7,7 @@ fn analyze(x: int, y: int) -> int {
         let z = y - x;
         return z;
     }
-    return 0;
+    return x;
 }
 
 fn main(x: int) {

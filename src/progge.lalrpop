@@ -29,12 +29,12 @@ pub Program: Program = {
     <fns: FuncDefL*> => Program(fns),
 }
 
+// These two non-terminals only exist for their side-effects
 OpenScope: () = {
     => {
         tctx.new_scope();
     },
 }
-
 CloseScope: () = {
     => {
         tctx.close_scope();
@@ -81,19 +81,19 @@ pub StmtDelimitedL: WithLoc<Stmt> = {
 // no trailing semi-colons
 pub StmtBlockL = WithLoc<StmtBlock>;
 pub StmtBlock: Stmt = {
-    "if" <e:ExprL> "{"
+    OpenScope "if" <e:ExprL> "{"
         <if_b:BlockL>
-    "}" <empty_else:@L> => Stmt::IfElse { cond: e, if_branch: if_b, else_branch:
+    "}" <empty_else:@L> CloseScope => Stmt::IfElse { cond: e, if_branch: if_b, else_branch:
         WithLoc { elem: Block(vec![]), loc: loc_from_offset(src, empty_else) },
     },
-    "if" <e:ExprL> "{"
+    OpenScope "if" <e:ExprL> "{"
         <if_b:BlockL>
     "}" "else" "{"
         <else_b:BlockL>
-    "}" => Stmt::IfElse { cond: e, if_branch: if_b, else_branch: else_b },
-    "while" <e:ExprL> "{"
+    "}" CloseScope => Stmt::IfElse { cond: e, if_branch: if_b, else_branch: else_b },
+    OpenScope "while" <e:ExprL> "{"
         <b:BlockL>
-    "}" => Stmt::While { cond: e, block: b },
+    "}" CloseScope => Stmt::While { cond: e, block: b },
 }
 
 // need trailing semi-bolon
