@@ -10,7 +10,6 @@ use crate::ast::BinOpcode;
 use crate::ir::{IntraProcCFG, IREdge, IRNode};
 
 // TODO: current state of affairs: Need abstract equal to allow for loops, also need abstract widening for that.
-// TODO: environment needs to give access to underlying vars
 // TODO: free_vars should work with a HashSet
 
 pub fn graphviz_with_states<M: Manager>(
@@ -21,12 +20,13 @@ pub fn graphviz_with_states<M: Manager>(
 ) -> String {
     let edge_getter = |_, edge: EdgeReference<IREdge>| {
         let mut intervals = "".to_owned();
-        // TODO: Add vars of environment to elina
-        // TODO: really need way in elina to get a string of abstract
-        let vars = &["x", "res"];
+        let vars = env.keys().map(|v| v.as_str()).collect::<Vec<_>>();
+        // let vars = &["x", "res"];
         for v in vars {
-            intervals += &format!("{}: {:?}\\n", v, state_map[&edge.id()].get_bounds(man, env, *v));
+            intervals += &format!("{}: {:?}\\n", v, state_map[&edge.id()].get_bounds(man, env, v));
         }
+
+        let abs_string = state_map[&edge.id()].to_string(man, env);
 
         let color = match edge.weight() {
             IREdge::Fallthrough => "black",
@@ -34,7 +34,7 @@ pub fn graphviz_with_states<M: Manager>(
             IREdge::NotTaken => "red",
         };
 
-        format!("label = \"{}\\n{}\" color = {}", *edge.weight(), intervals, color)
+        format!("label = \"{}\\n{}\\n{}\" color = {}", *edge.weight(), abs_string, intervals, color)
     };
     let node_getter = |_, _| {
         format!("")
