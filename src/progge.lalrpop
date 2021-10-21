@@ -44,11 +44,16 @@ Param: (WithLoc<Var>, WithLoc<Type>) = {
 
 pub BlockL = WithLoc<Block>;
 pub Block: Block = {
-    (<StmtL> ";")* => {
+    (StmtCommaDelimitedL)* => {
         // println!("{:?} {:?}", start, end);
         // println!("{:?}", src);
         Block(<>)
     },
+}
+
+pub StmtCommaDelimitedL: WithLoc<Stmt> = {
+    <StmtL> ";",
+    <StmtBlockL>,
 }
 
 // EmptyBlockL = WithLoc<EmptyBlock>;
@@ -56,13 +61,9 @@ pub Block: Block = {
 //      => Block(vec![]),
 // }
 
-pub StmtL = WithLoc<Stmt>;
-pub Stmt: Stmt = {
-    "testcase!" => Stmt::Testcase(),
-    "unreachable!" => Stmt::Unreachable(),
-    "return" <e:ExprL> => Stmt::Return(e),
-    "let" <v:VarL> "=" <e:ExprL> => Stmt::Decl(v, e),
-    <v:VarL> "=" <e:ExprL> => Stmt::Assn(v, e),
+// no trailing comma
+pub StmtBlockL = WithLoc<StmtBlock>;
+pub StmtBlock: Stmt = {
     "if" <e:ExprL> "{"
         <if_b:BlockL>
     "}" <empty_else:@L> => Stmt::IfElse { cond: e, if_branch: if_b, else_branch:
@@ -76,6 +77,16 @@ pub Stmt: Stmt = {
     "while" <e:ExprL> "{"
         <b:BlockL>
     "}" => Stmt::While { cond: e, block: b },
+}
+
+// needs trailing comma
+pub StmtL = WithLoc<Stmt>;
+pub Stmt: Stmt = {
+    "testcase!" => Stmt::Testcase(),
+    "unreachable!" => Stmt::Unreachable(),
+    "return" <e:ExprL> => Stmt::Return(e),
+    "let" <v:VarL> "=" <e:ExprL> => Stmt::Decl(v, e),
+    <v:VarL> "=" <e:ExprL> => Stmt::Assn(v, e),
 }
 
 ExprL = {
