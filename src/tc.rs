@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use crate::ast::*;
 
+// Add proper type checking, with results, make use of Loc
 
 pub fn type_of(e: &Expr) -> Type {
     // Assumes the expression is type checked, then gives it a type.

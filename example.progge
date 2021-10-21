@@ -1,5 +1,7 @@
 fn analyze(x: int, y: int) -> int {
-    if x < y + 5000 {
+    let unknown = false;
+
+    if x < y && unknown {
         while x < y {
             x = x + 1;
             y = y - 1;

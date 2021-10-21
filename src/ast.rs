@@ -197,6 +197,21 @@ impl Expr {
             UnOp(_, inner) => inner.free_vars(),
         }
     }
+
+    pub fn contains_bool_var(&self) -> bool {
+        use Type::*;
+
+        match self {
+            Expr::IntLit(_) | Expr::BoolLit(_) => false,
+            Expr::Var(v) if v.is_bool() => true,
+            Expr::Var(_) => false,
+            Expr::Call(_, args) =>
+                args.into_iter().any(|arg| arg.contains_bool_var()),
+            Expr::BinOp(_, left, right) =>
+                left.contains_bool_var() || right.contains_bool_var(),
+            Expr::UnOp(_, inner) => inner.contains_bool_var(),
+        }
+    }
 }
 
 impl Display for Expr {
@@ -299,7 +314,7 @@ impl Display for UnOpcode {
 //     Binop(Box<BoolExpr>),
 // }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Type {
     Int,
     Bool,
@@ -319,6 +334,16 @@ impl Display for Type {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Var(pub String, pub Type);
+
+impl Var {
+    pub fn is_bool(&self) -> bool {
+        self.1 == Type::Bool
+    }
+
+    pub fn is_int(&self) -> bool {
+        self.1 == Type::Int
+    }
+}
 
 impl Deref for Var {
     type Target = String;

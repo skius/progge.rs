@@ -188,11 +188,21 @@ fn handle_irnode<M: Manager>(man: &M, env: &Environment, ir: &IRNode, state: &mu
         IRTestcase | IRUnreachable | IRSkip | IRBranch =>
             None,
         IRDecl(v, e) => {
+            if v.is_bool() {
+                // Not handling boolean variables
+                return None;
+            }
+
             let texpr = int_expr_to_texpr(env, e);
             state.assign(man, env, v.as_str(), &texpr);
             None
         }
         IRAssn(v, e) => {
+            if v.is_bool() {
+                // Not handling boolean variables
+                return None;
+            }
+
             let texpr = int_expr_to_texpr(env, e);
             state.assign(man, env, v.as_str(), &texpr);
             None
@@ -203,8 +213,11 @@ fn handle_irnode<M: Manager>(man: &M, env: &Environment, ir: &IRNode, state: &mu
             None
         }
         IRCBranch(cond) => {
-            // TODO: branch here based on "is cond deterministic/does cond only contain int variables"
-            // otherwise, meet with TOP for both branches, i.e. no-op
+            // We don't analyze boolean variables currently, so we overapproximate
+            if cond.contains_bool_var() {
+                let taken = state.clone();
+                return Some(taken);
+            }
 
             let hcons = bool_expr_to_hcons(env, cond);
             let mut taken = state.clone();
