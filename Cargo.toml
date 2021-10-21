@@ -16,4 +16,4 @@ lalrpop = "0.19.6"
 elina = { git = "https://github.com/skius/elina-rs" }
 lalrpop-util = "0.19.6"
 regex = "1"
-
+petgraph = "0.6.0"
