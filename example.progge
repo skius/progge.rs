@@ -1,6 +1,11 @@
 fn main(x: int) {
-    let x = !x < 3 || false && true - 222;
-    x = ex(ex(3 + 3));
+    let res = 0;
+    if x < 100 {
+        res = 1000;
+    }
+    res = res;
+    return res;
+
 }
 
 fn ex(i: int) -> int {
