@@ -1,6 +1,7 @@
 // TODO: remove Loc everywhere, only add it to testcase! or where needed. Can still use later.
 // TODO: or use deref maybe?
 
+use std::collections::HashSet;
 use std::fmt::{Debug, Display, Formatter, Write};
 use std::ops::Deref;
 
@@ -169,22 +170,28 @@ pub enum Expr {
 
 impl Expr {
     // TODO: make free_vars a trait?
-    // TODO: change to set
-    pub fn free_vars(&self) -> Vec<Var> {
+    pub fn free_vars(&self) -> HashSet<Var> {
         use Expr::*;
 
         match self {
-            IntLit(_) | BoolLit(_) => vec![],
-            Var(v) => vec![v.elem.clone()],
+            IntLit(_) | BoolLit(_) => HashSet::new(),
+            Var(v) => {
+                let mut fv = HashSet::new();
+                fv.insert(v.elem.clone());
+                fv
+            },
             Call(_, args) => args
                     .into_iter()
                     .map(|arg| arg.free_vars())
-                    .collect::<Vec<_>>()
-                    .concat(),
+                    .fold(HashSet::new(), |mut acc, fv| {
+                        acc.extend(fv);
+                        acc
+                    }),
             BinOp(_, left, right) => {
                 let mut left_fv = left.free_vars();
                 let mut right_fv = right.free_vars();
-                left_fv.append(&mut right_fv);
+                left_fv.extend(right_fv);
+
                 left_fv
             }
             UnOp(_, inner) => inner.free_vars(),
@@ -292,7 +299,7 @@ impl Display for UnOpcode {
 //     Binop(Box<BoolExpr>),
 // }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Type {
     Int,
     Bool,
@@ -310,7 +317,7 @@ impl Display for Type {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Var(pub String);
 
 impl Deref for Var {

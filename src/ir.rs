@@ -33,16 +33,16 @@ pub enum IRNode {
 }
 
 impl IRNode {
-    pub fn free_vars(&self) -> Vec<Var> {
+    pub fn free_vars(&self) -> HashSet<Var> {
         match self {
             IRDecl(v, e) | IRAssn(v, e) => {
                 let mut fv = e.free_vars();
-                fv.push(v.clone());
+                fv.insert(v.clone());
                 fv
             },
             IRReturn(e) => e.free_vars(),
             IRCBranch(e) => e.free_vars(),
-            _ => vec![],
+            _ => HashSet::new(),
         }
     }
 }

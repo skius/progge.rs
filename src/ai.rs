@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use elina::ast::{Abstract, Environment, Hcons, Manager, OptPkManager, Tcons, Texpr, TexprBinop, TexprUnop};
 use petgraph::Direction::{Incoming, Outgoing};
 use petgraph::dot::{Config, Dot};
@@ -21,7 +21,8 @@ pub fn graphviz_with_states<M: Manager>(
         let mut intervals = "".to_owned();
 
         if !state_map[&edge.id()].is_bottom(man) {
-            let vars = env.keys().map(|v| v.as_str()).collect::<Vec<_>>();
+            let mut vars = env.keys().map(|v| v.as_str()).collect::<Vec<_>>();
+            vars.sort();
             // let vars = &["x", "res"];
             for v in vars {
                 intervals += &format!("{}: {:?}\\n", v, state_map[&edge.id()].get_bounds(man, env, v));
@@ -60,17 +61,16 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
 
     let man = OptPkManager::default();
 
-    let mut free_vars = vec![];
+    let mut free_vars = HashSet::new();
 
     let mut dfs = Dfs::new(graph, entry);
     while let Some(nx) = dfs.next(graph) {
         let irn = &graph[nx];
-        free_vars.append(&mut irn.free_vars());
+        free_vars.extend(irn.free_vars());
     }
 
     let mut free_vars = free_vars.into_iter().map(|v| v.0).collect::<Vec<_>>();
     free_vars.sort();
-    free_vars.dedup_by(|a, b| a == b);
     println!("{:?}", free_vars);
     let env = Environment::new(free_vars);
 
