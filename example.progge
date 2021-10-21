@@ -1,3 +1,15 @@
+fn analyze(x: int, y: int) -> int {
+    if x < y + 5000 {
+        while x < y {
+            x = x + 1;
+            y = y - 1;
+        }
+        let z = y - x;
+        return z;
+    }
+    return 0;
+}
+
 fn main(x: int) {
     let res = 0;
     if x < 100 {

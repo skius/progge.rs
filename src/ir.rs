@@ -56,7 +56,7 @@ impl Display for IRNode {
             IRDecl(v, e) => f.write_str(&format!("let {} = {}", v, e)),
             IRAssn(v, e) => f.write_str(&format!("{} = {}", v, e)),
             IRReturn(e) => f.write_str(&format!("return {}", e)),
-            IRCBranch(e) => f.write_str(&format!("<cond. branch> {}", e)),
+            IRCBranch(e) => f.write_str(&format!("<cbranch> {}", e)),
             IRBranch => f.write_str("<branch>"),
         }
     }
@@ -101,7 +101,8 @@ fn add_block_to_graph(graph: &mut IntraGraph, block: &Block, mut prev_nodes: Vec
                 for (prev_node, connect_prev) in &prev_nodes {
                     graph.add_edge(*prev_node, added, *connect_prev);
                 }
-                prev_nodes = vec![(added, Fallthrough)];
+                // prev_nodes = vec![(added, Fallthrough)];
+                prev_nodes = vec![];
             }
             Stmt::Decl(ref v, ref e) => {
                 let added = graph.add_node(IRDecl(v.elem.clone(), e.elem.clone()));
@@ -154,6 +155,11 @@ fn add_block_to_graph(graph: &mut IntraGraph, block: &Block, mut prev_nodes: Vec
 
                 prev_nodes = vec![(branch, NotTaken)];
             }
+        }
+
+        if prev_nodes.is_empty() {
+            // will never add new nodes
+            break;
         }
     }
 

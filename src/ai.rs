@@ -2,14 +2,13 @@ use std::collections::{HashMap, VecDeque};
 use elina::ast::{Abstract, Environment, Hcons, Manager, OptPkManager, Tcons, Texpr, TexprBinop, TexprUnop};
 use petgraph::Direction::{Incoming, Outgoing};
 use petgraph::dot::{Config, Dot};
-use petgraph::graph::{EdgeIndex, EdgeReference};
+use petgraph::graph::{EdgeIndex, EdgeReference, node_index, NodeIndex};
 use petgraph::prelude::Dfs;
 use petgraph::visit::{EdgeRef, IntoEdges, Visitable};
 use crate::ast::{Expr, UnOpcode, WithLoc};
 use crate::ast::BinOpcode;
 use crate::ir::{IntraProcCFG, IREdge, IRNode};
 
-// TODO: current state of affairs: Need abstract equal to allow for loops, also need abstract widening for that.
 // TODO: free_vars should work with a HashSet
 
 pub fn graphviz_with_states<M: Manager>(
@@ -20,10 +19,13 @@ pub fn graphviz_with_states<M: Manager>(
 ) -> String {
     let edge_getter = |_, edge: EdgeReference<IREdge>| {
         let mut intervals = "".to_owned();
-        let vars = env.keys().map(|v| v.as_str()).collect::<Vec<_>>();
-        // let vars = &["x", "res"];
-        for v in vars {
-            intervals += &format!("{}: {:?}\\n", v, state_map[&edge.id()].get_bounds(man, env, v));
+
+        if !state_map[&edge.id()].is_bottom(man) {
+            let vars = env.keys().map(|v| v.as_str()).collect::<Vec<_>>();
+            // let vars = &["x", "res"];
+            for v in vars {
+                intervals += &format!("{}: {:?}\\n", v, state_map[&edge.id()].get_bounds(man, env, v));
+            }
         }
 
         let abs_string = state_map[&edge.id()].to_string(man, env);
@@ -49,7 +51,10 @@ pub fn graphviz_with_states<M: Manager>(
     format!("{}", dot)
 }
 
+static WIDENING_THRESHOLD: usize = 100;
 pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
+
+
     let graph = &cfg.graph;
     let entry = cfg.entry;
 
@@ -70,19 +75,27 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
     let env = Environment::new(free_vars);
 
     let mut edge_state_map = HashMap::new();
+    let mut state_before_node: HashMap<NodeIndex, Abstract> = HashMap::new();
+    let mut node_encounters: HashMap<NodeIndex, usize> = HashMap::new();
 
     for edge in graph.edge_indices() {
         edge_state_map.insert(edge, Abstract::bottom(&man, &env));
     }
-
-    let entry_outs = graph
-        .edges_directed(entry, Outgoing)
-        .map(|e| e.id())
-        .collect::<Vec<_>>();
-
-    for entry_out in &entry_outs {
-        edge_state_map.insert(*entry_out, Abstract::top(&man, &env));
+    for node in graph.node_indices() {
+        state_before_node.insert(node, Abstract::bottom(&man, &env));
+        node_encounters.insert(node, 0);
     }
+
+    // let entry_outs = graph
+    //     .edges_directed(entry, Outgoing)
+    //     .map(|e| e.id())
+    //     .collect::<Vec<_>>();
+
+    // for entry_out in &entry_outs {
+    //     edge_state_map.insert(*entry_out, Abstract::top(&man, &env));
+    // }
+
+    state_before_node.insert(entry, Abstract::top(&man, &env));
 
     let mut worklist = VecDeque::new();
     worklist.push_back(entry);
@@ -96,20 +109,38 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
             .collect::<Vec<_>>();
 
 
+        let prev_state = &state_before_node[&curr_node];
 
-        let mut incoming_state = Abstract::bottom(&man, &env);
-        for state in &incoming_states {
-            // TODO: add join &[Abstract] to elina?
-            incoming_state.join(&man, *state);
+        let mut curr_state = if curr_node == entry {
+            Abstract::top(&man, &env)
+        } else {
+            let mut curr_state = Abstract::bottom(&man, &env);
+            for state in &incoming_states {
+                // TODO: add join &[Abstract] to elina?
+                curr_state.join(&man, *state);
+            }
+            curr_state
+        };
+
+        // // Check widening (of course only if we've ever actually done something
+        // if prev_state == &curr_state && node_encounters[&curr_node] > 0 {
+        //     // nothing to do, continue
+        //     continue;
+        // }
+        // prev_state != curr_state
+        *node_encounters.get_mut(&curr_node).unwrap() += 1;
+        if node_encounters[&curr_node] > WIDENING_THRESHOLD {
+            println!("\n--------\nWIDENING: prev{} and curr{}", prev_state.to_string(&man, &env), curr_state.to_string(&man, &env));
+            curr_state = prev_state.widen_copy(&man, &curr_state);
+            println!("WIDENED INTO: {}", curr_state.to_string(&man, &env));
         }
-        if incoming_states.len() == 0 {
-            // Must be an entry node
-            incoming_state = Abstract::top(&man, &env);
-        }
+        state_before_node.insert(curr_node, curr_state.clone());
+
 
         // Need to compute outgoing state
         let curr_irnode = graph[curr_node].clone();
-        let taken_state = handle_irnode(&man, &env, &curr_irnode, &mut incoming_state);
+        let taken_state = handle_irnode(&man, &env, &curr_irnode, &mut curr_state);
+
 
         let outgoing_edges = graph
             .edges_directed(curr_node, Outgoing)
@@ -118,21 +149,26 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
 
         for out_edge in outgoing_edges {
             let edge_kind = *out_edge.weight();
-            match edge_kind {
+            let out_state = match edge_kind {
                 IREdge::Fallthrough | IREdge::NotTaken => {
-                    // edge_state_map[&out_edge.id()] = incoming_state.clone();
-                    edge_state_map.insert(out_edge.id(), incoming_state.clone());
-                    // if old_state != incoming_state then add to worklist
-                    worklist.push_back(out_edge.target());
+                    curr_state.clone()
                 }
                 IREdge::Taken => {
                     // curr_node must be CBranch and we must have gotten a Some(taken) result state
-                    // edge_state_map[&out_edge.id()] = taken_state.unwrap().clone();
-                    edge_state_map.insert(out_edge.id(), taken_state.clone().unwrap());
-                    // if old_state != taken_state then add to worklist
-                    worklist.push_back(out_edge.target());
+                    taken_state.clone().unwrap()
                 }
+            };
+
+            println!("\n-----\nHandling Edge\nold out edge state: {}", edge_state_map[&out_edge.id()].to_string(&man, &env));
+            println!("new out_state: {}", out_state.to_string(&man, &env));
+
+            if edge_state_map[&out_edge.id()] == out_state {
+                // we are not causing a change in succ
+                continue;
             }
+            edge_state_map.insert(out_edge.id(), out_state);
+            // if old_state != taken_state then add to worklist
+            worklist.push_back(out_edge.target());
         }
 
 
