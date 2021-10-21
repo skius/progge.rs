@@ -1,7 +1,8 @@
 use std::str::FromStr;
 use proggers::ast::*;
+use proggers::tc::*;
 
-grammar(src: &str);
+grammar(filename: &str, src: &str, tctx: &mut VariableTypeContext);
 
 WithLoc<T>: WithLoc<T> = {
     <start:@L> <elem:T> => WithLoc { elem: elem, loc: loc_from_offset(src, start) },
@@ -28,30 +29,46 @@ pub Program: Program = {
     <fns: FuncDefL*> => Program(fns),
 }
 
+OpenScope: () = {
+    => {
+        tctx.new_scope();
+    },
+}
+
+CloseScope: () = {
+    => {
+        tctx.close_scope();
+    },
+}
+
 pub FuncDefL = WithLoc<FuncDef>;
 pub FuncDef: FuncDef = {
-    "fn" <name:NameL> "(" <params:Comma<Param>> ")" <empty_retty_loc:@L> <retty:("->" <TypeL>)?> "{"
+    OpenScope "fn" <name:NameL> "(" <params:Comma<Param>> ")" <empty_retty_loc:@L> <retty:("->" <TypeL>)?> "{"
         <body:BlockL>
-    "}" => FuncDef { name:name, params: params, retty: match retty {
+    "}" CloseScope => FuncDef { name:name, params: params, retty: match retty {
         Some(retty) => retty,
         None => WithLoc { elem: Type::Unit, loc: loc_from_offset(src, empty_retty_loc) },
     }, body: body },
 }
 
 Param: (WithLoc<Var>, WithLoc<Type>) = {
-    <name:VarL> ":" <typ:TypeL> => (name, typ),
+    <name:NameL> ":" <typ:TypeL> => {
+        let loc = name.loc;
+        tctx.insert(name.elem.clone(), *typ);
+        (WithLoc { elem: Var(name.elem, *typ), loc: loc }, typ)
+    },
 }
 
 pub BlockL = WithLoc<Block>;
 pub Block: Block = {
-    (StmtCommaDelimitedL)* => {
+    (StmtDelimitedL)* => {
         // println!("{:?} {:?}", start, end);
         // println!("{:?}", src);
         Block(<>)
     },
 }
 
-pub StmtCommaDelimitedL: WithLoc<Stmt> = {
+pub StmtDelimitedL: WithLoc<Stmt> = {
     <StmtL> ";",
     <StmtBlockL>,
 }
@@ -61,7 +78,7 @@ pub StmtCommaDelimitedL: WithLoc<Stmt> = {
 //      => Block(vec![]),
 // }
 
-// no trailing comma
+// no trailing semi-colons
 pub StmtBlockL = WithLoc<StmtBlock>;
 pub StmtBlock: Stmt = {
     "if" <e:ExprL> "{"
@@ -79,14 +96,23 @@ pub StmtBlock: Stmt = {
     "}" => Stmt::While { cond: e, block: b },
 }
 
-// needs trailing comma
+// need trailing semi-bolon
 pub StmtL = WithLoc<Stmt>;
 pub Stmt: Stmt = {
     "testcase!" => Stmt::Testcase(),
     "unreachable!" => Stmt::Unreachable(),
     "return" <e:ExprL> => Stmt::Return(e),
-    "let" <v:VarL> "=" <e:ExprL> => Stmt::Decl(v, e),
-    <v:VarL> "=" <e:ExprL> => Stmt::Assn(v, e),
+    "let" <n:NameL> "=" <e:ExprL> => {
+        let t = type_of(&e);
+        let loc = n.loc;
+        tctx.insert(n.elem.clone(), t);
+        Stmt::Decl(WithLoc { elem: Var(n.elem, t), loc: loc}, e)
+    },
+    <n:NameL> "=" <e:ExprL> => {
+        let t = type_of(&e);
+        let loc = n.loc;
+        Stmt::Assn(WithLoc { elem: Var(n.elem, t), loc: loc}, e)
+    },
 }
 
 ExprL = {
@@ -97,20 +123,20 @@ ExprL = {
 BExpr0L = WithLoc<BExpr0>;
 BExpr0 = TierL<BExpr0OpL, BExpr1>;
 // &&
-BExpr1L = WithLoc<BExpr1>;
+//BExpr1L = WithLoc<BExpr1>;
 BExpr1 = TierL<BExpr1OpL, BExpr2>;
 // == !=
-BExpr2L = WithLoc<BExpr2>;
+//BExpr2L = WithLoc<BExpr2>;
 BExpr2 = TierL<BExpr2OpL, BExpr3>;
 // < <= > >=
-BExpr3L = WithLoc<BExpr3>;
+//BExpr3L = WithLoc<BExpr3>;
 BExpr3 = TierL<RopcodeL, IExpr0>;
 
 // + -
-IExpr0L = WithLoc<IExpr0>;
+//IExpr0L = WithLoc<IExpr0>;
 IExpr0 = TierL<IExpr0OpL, IExpr1>;
 // * % /
-IExpr1L = WithLoc<IExpr1>;
+//IExpr1L = WithLoc<IExpr1>;
 IExpr1 = TierL<IExpr1OpL, LeafExpr>;
 
 LeafExprL = WithLoc<LeafExpr>;
@@ -119,7 +145,15 @@ LeafExpr: Expr = {
     "true" => Expr::BoolLit(true),
     "false" => Expr::BoolLit(false),
     <n:NameL> "(" <args:Comma<ExprL>> ")" => Expr::Call(n, args),
-    <v:VarL> => Expr::Var(v),
+    <n:NameL> => {
+ // TODO: instead of panicking, I could use a placeholder type here to complete the parse
+        let t = tctx.lookup(&n).unwrap_or_else(|| {
+            println!("{}:{}:{}: used variable \"{}\" before definition", filename, n.loc.line, n.loc.col, n.elem);
+            panic!("variable use before defined");
+        });
+        let loc = n.loc;
+        Expr::Var(WithLoc { elem: Var(n.elem, t), loc: loc })
+    },
     <op:IUnOpL> <e:LeafExprL> => Expr::UnOp(op, Box::new(e)),
     <op:BUnOpL> <e:LeafExprL> => Expr::UnOp(op, Box::new(e)),
     "(" <BExpr0> ")" => <>,
@@ -180,9 +214,9 @@ Type: Type = {
     "unit" => Type::Unit,
 }
 
-VarL: WithLoc<Var> = {
-    <name:WithLoc<Name>> => WithLoc { elem: Var(name.elem), loc: name.loc },
-}
+//VarL: WithLoc<Var> = {
+//    <name:WithLoc<Name>> => WithLoc { elem: Var(name.elem), loc: name.loc },
+//}
 
 NameL = WithLoc<Name>;
 Name: String = r"[A-Za-z_][A-Za-z0-9_]*" => (<>).to_owned();

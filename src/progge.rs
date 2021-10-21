@@ -5,6 +5,7 @@ use std::ops::Deref;
 use std::str::from_utf8_unchecked;
 use proggers::ast::*;
 use proggers::ir::{IntraProcCFG};
+use proggers::tc::VariableTypeContext;
 
 lalrpop_mod!(pub progge); // synthesized by LALRPOP
 
@@ -14,7 +15,8 @@ fn main() {
     // a variable's type, you look first in the top hashmap, then go down.
 
     let src = read_to_string("example.progge").unwrap();
-    let prog: WithLoc<Program> = progge::ProgramLParser::new().parse(&src, &src).unwrap();
+    let mut tctx = VariableTypeContext::new();
+    let prog: WithLoc<Program> = progge::ProgramLParser::new().parse("example.progge", &src, &mut tctx, &src).unwrap();
 
     dbg!(&prog);
     proggers::ir::do_stuff();

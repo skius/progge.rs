@@ -299,7 +299,7 @@ impl Display for UnOpcode {
 //     Binop(Box<BoolExpr>),
 // }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy)]
 pub enum Type {
     Int,
     Bool,
@@ -318,7 +318,7 @@ impl Display for Type {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct Var(pub String);
+pub struct Var(pub String, pub Type);
 
 impl Deref for Var {
     type Target = String;
