@@ -150,6 +150,7 @@ LeafExpr: Expr = {
         let t = tctx.lookup(&n).unwrap_or_else(|| {
             println!("{}:{}:{}: used variable \"{}\" before definition", filename, n.loc.line, n.loc.col, n.elem);
             // panic!("variable use before defined");
+            // We are implementing above TODO currently.
             Type::Unit
         });
         let loc = n.loc;
