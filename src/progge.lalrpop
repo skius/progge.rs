@@ -2,7 +2,16 @@ use std::str::FromStr;
 use proggers::ast::*;
 use proggers::tc::*;
 
+
 grammar(filename: &str, src: &str, tctx: &mut VariableTypeContext);
+
+// Ignore comments
+match {
+    r"\s*" => { }, // The default whitespace skipping is disabled an `ignore pattern` is specified
+    r"//[^\n\r]*[\n\r]*" => { }, // Skip `// comments`
+    r"/\*([^\*]*\*+[^\*/])*([^\*]*\*+|[^\*])*\*/" => { },  // Skip `/* comments */`
+    _
+}
 
 WithLoc<T>: WithLoc<T> = {
     <start:@L> <elem:T> => WithLoc { elem: elem, loc: loc_from_offset(src, start) },

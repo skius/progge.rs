@@ -1,12 +1,14 @@
 fn analyze(x: int, y: int) -> int {
-    let outer = 5;
-    if true {
-        outer = 10;
-        let inner = 10;
-    }
-    let outer = inner;
+    // let outer = 5;
+    // if true {
+    //     outer = 10;
+    //     let inner = 10;
+    // }
+    // let outer = inner;
+    /* test */
+    let inner = 5;
 
-    if x < y && inner - 2 {
+    if x < y && inner - 2 < 2 {
         while x < y {
             x = x + 1;
             y = y - 1;
