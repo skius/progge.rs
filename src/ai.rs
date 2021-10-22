@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use elina::ast::{Abstract, Environment, Hcons, Manager, OptPkManager, Tcons, Texpr, TexprBinop, TexprUnop};
+use elina::ast::{Abstract, Environment, Hcons, Manager, OptPkManager, Texpr, TexprBinop, TexprUnop};
 use petgraph::Direction::{Incoming, Outgoing};
 use petgraph::dot::{Config, Dot};
-use petgraph::graph::{EdgeIndex, EdgeReference, node_index, NodeIndex};
+use petgraph::graph::{EdgeIndex, EdgeReference, NodeIndex};
 use petgraph::prelude::Dfs;
-use petgraph::visit::{EdgeRef, IntoEdges, Visitable};
+use petgraph::visit::{EdgeRef};
 
 use crate::ast::{Expr, UnOpcode, WithLoc};
 use crate::ast::BinOpcode;
@@ -209,7 +209,7 @@ fn handle_irnode<M: Manager>(man: &M, env: &Environment, ir: &IRNode, state: &mu
             state.assign(man, env, v.as_str(), &texpr);
             None
         }
-        IRReturn(e) => {
+        IRReturn(_e) => {
             // TODO: Handle return better. How?
 
             None
@@ -300,7 +300,7 @@ fn bool_expr_to_hcons(env: &Environment, expr: &Expr) -> Hcons {
 }
 
 fn int_expr_to_texpr(env: &Environment, expr: &Expr) -> Texpr {
-    use BinOpcode::*;
+    
     use Expr::*;
 
     match expr {

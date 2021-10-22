@@ -1,17 +1,17 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashSet};
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 
-use petgraph::Direction;
-use petgraph::Direction::{Incoming, Outgoing};
-use petgraph::dot::{Config, Dot};
+
+
+use petgraph::dot::{Dot};
 use petgraph::graph::{DiGraph, NodeIndex};
 
 use IREdge::*;
 use IRNode::*;
 
 use crate::ast::*;
-use crate::ast::Stmt::Testcase;
+
 
 pub struct IntraProcCFG {
     pub graph: IntraGraph,
@@ -174,7 +174,7 @@ impl From<&FuncDef> for IntraProcCFG {
         let entry = graph.add_node(IRSkip);
 
         let prev_node = entry;
-        let exit_nodes = add_block_to_graph(&mut graph, &f.body, vec![(prev_node, Fallthrough)]);
+        let _exit_nodes = add_block_to_graph(&mut graph, &f.body, vec![(prev_node, Fallthrough)]);
 
         IntraProcCFG {
             graph,

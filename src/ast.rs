@@ -206,7 +206,7 @@ impl Expr {
     }
 
     pub fn contains_bool_var(&self) -> bool {
-        use Type::*;
+        
 
         match self {
             Expr::IntLit(_) | Expr::BoolLit(_) => false,
@@ -325,13 +325,13 @@ pub enum UnOpcode {
 }
 
 impl UnOpcode {
-    pub fn get_type(&self) -> OpcodeType<(Type)> {
+    pub fn get_type(&self) -> OpcodeType<Type> {
         use UnOpcode::*;
         use Type::*;
 
         match self {
-            Neg => OpcodeType((Int), Int),
-            Not => OpcodeType((Bool), Bool),
+            Neg => OpcodeType(Int, Int),
+            Not => OpcodeType(Bool, Bool),
         }
     }
 }

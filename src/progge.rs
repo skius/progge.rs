@@ -3,7 +3,7 @@
 use std::fs::read_to_string;
 
 use proggers::ast::*;
-use proggers::ir::IntraProcCFG;
+
 use proggers::tc::{FuncTypeContext, TcError, TypeChecker, VariableTypeContext};
 
 lalrpop_mod!(pub progge); // synthesized by LALRPOP

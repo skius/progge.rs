@@ -1,7 +1,7 @@
 use std::borrow::{Borrow};
-use std::cell::{Ref, RefCell};
-use std::collections::{HashMap, HashSet};
-use std::error::Error;
+use std::cell::{RefCell};
+use std::collections::{HashMap};
+
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::rc::{Rc, Weak};
@@ -495,7 +495,7 @@ impl TypeChecker {
                     Some(t) => Ok(t),
                 }
             },
-            Expr::Call(name, args) => {
+            Expr::Call(_name, _args) => {
                 todo!()
             },
             Expr::BinOp(op, left, right) => {
