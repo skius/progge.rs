@@ -1,17 +1,14 @@
-use std::collections::{HashSet};
+use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 
-
-
-use petgraph::dot::{Dot};
+use petgraph::dot::Dot;
 use petgraph::graph::{DiGraph, NodeIndex};
 
 use IREdge::*;
 use IRNode::*;
 
 use crate::ast::*;
-
 
 pub struct IntraProcCFG {
     pub graph: IntraGraph,
@@ -41,7 +38,7 @@ impl IRNode {
                 let mut fv = e.free_vars();
                 fv.insert(v.clone());
                 fv
-            },
+            }
             IRReturn(e) => e.free_vars(),
             IRCBranch(e) => e.free_vars(),
             _ => HashSet::new(),
@@ -81,7 +78,11 @@ impl Display for IREdge {
     }
 }
 
-fn add_block_to_graph(graph: &mut IntraGraph, block: &Block, mut prev_nodes: Vec<(NodeIndex, IREdge)>) -> Vec<(NodeIndex, IREdge)> {
+fn add_block_to_graph(
+    graph: &mut IntraGraph,
+    block: &Block,
+    mut prev_nodes: Vec<(NodeIndex, IREdge)>,
+) -> Vec<(NodeIndex, IREdge)> {
     for stm in &**block {
         match **stm {
             Stmt::Testcase() => {
@@ -120,7 +121,11 @@ fn add_block_to_graph(graph: &mut IntraGraph, block: &Block, mut prev_nodes: Vec
                 }
                 prev_nodes = vec![(added, Fallthrough)];
             }
-            Stmt::IfElse { ref cond, ref if_branch, ref else_branch } => {
+            Stmt::IfElse {
+                ref cond,
+                ref if_branch,
+                ref else_branch,
+            } => {
                 let branch = graph.add_node(IRCBranch(cond.deref().clone()));
                 for (prev_node, connect_prev) in &prev_nodes {
                     graph.add_edge(*prev_node, branch, *connect_prev);
@@ -132,13 +137,16 @@ fn add_block_to_graph(graph: &mut IntraGraph, block: &Block, mut prev_nodes: Vec
                 // graph.add_edge(branch, else_root, NotTaken);
 
                 let mut prev_nodes_if = add_block_to_graph(graph, if_branch, vec![(branch, Taken)]);
-                let mut prev_nodes_else = add_block_to_graph(graph, else_branch, vec![(branch, NotTaken)]);
+                let mut prev_nodes_else =
+                    add_block_to_graph(graph, else_branch, vec![(branch, NotTaken)]);
 
                 prev_nodes_if.append(&mut prev_nodes_else);
                 prev_nodes = prev_nodes_if;
             }
-            Stmt::While { ref cond, ref block } => {
-
+            Stmt::While {
+                ref cond,
+                ref block,
+            } => {
                 // prev -> branch -TRUE-> block_root -> ...block... |
                 //          | /\-------------------------------------
                 //          |

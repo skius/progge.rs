@@ -1,4 +1,5 @@
-#[macro_use] extern crate lalrpop_util;
+#[macro_use]
+extern crate lalrpop_util;
 
 use std::fs::read_to_string;
 
@@ -15,7 +16,9 @@ fn main() -> Result<(), TcError> {
 
     let src = read_to_string("example.progge").unwrap();
     let mut tctx = VariableTypeContext::new();
-    let prog: WithLoc<Program> = progge::ProgramLParser::new().parse("example.progge", &src, &mut tctx, &src).unwrap();
+    let prog: WithLoc<Program> = progge::ProgramLParser::new()
+        .parse("example.progge", &src, &mut tctx, &src)
+        .unwrap();
 
     // dbg!(&prog);
 

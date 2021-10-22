@@ -1,6 +1,6 @@
-use std::borrow::{Borrow};
-use std::cell::{RefCell};
-use std::collections::{HashMap};
+use std::borrow::Borrow;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
@@ -11,11 +11,11 @@ use crate::ast::*;
 // Add proper type checking, with results, make use of Loc
 
 /*
-    Idea for type context:
-    Make it a tree. i.e. have each scope be a node
-    and the tree's "child_of" relation is "scope_contained_in" for scopes.
+   Idea for type context:
+   Make it a tree. i.e. have each scope be a node
+   and the tree's "child_of" relation is "scope_contained_in" for scopes.
 
- */
+*/
 
 pub struct ScopedTypeContext {
     parent: RefCell<Weak<ScopedTypeContext>>,
@@ -85,16 +85,16 @@ impl ScopedTypeContext {
     }
 }
 
-
 pub struct FuncTypeContext(HashMap<String, (Vec<Param>, Type)>);
 
 impl<P: Borrow<Program>> From<P> for FuncTypeContext {
     fn from(p: P) -> Self {
-        let map = p.borrow().0.iter()
-            .map(|fd| (&*fd.name ,(&fd.params, &*fd.retty)))
-            .map(|(name, (params, retty))| {
-                (name.clone(), (params.clone(), retty.clone()))
-            })
+        let map = p
+            .borrow()
+            .0
+            .iter()
+            .map(|fd| (&*fd.name, (&fd.params, &*fd.retty)))
+            .map(|(name, (params, retty))| (name.clone(), (params.clone(), retty.clone())))
             .collect::<HashMap<_, _>>();
 
         FuncTypeContext(map)
@@ -119,7 +119,7 @@ impl TcErrorInner {
     pub fn new<S: AsRef<str>>(msg: S, loc: Loc) -> TcErrorInner {
         TcErrorInner {
             kind: msg.as_ref().to_string(),
-            loc
+            loc,
         }
     }
 }
@@ -141,15 +141,14 @@ impl TcError {
     pub fn new<S: AsRef<str>>(msg: S, loc: Loc) -> TcError {
         TcError(vec![TcErrorInner {
             kind: msg.as_ref().to_string(),
-            loc
+            loc,
         }])
     }
 
     pub fn print_error_message<S: AsRef<str>>(&self, src: S) {
-        self.0.iter()
-            .for_each(|inner| {
-                print!("{}:{}\n", src.as_ref(), inner)
-            })
+        self.0
+            .iter()
+            .for_each(|inner| print!("{}:{}\n", src.as_ref(), inner))
     }
 }
 
@@ -164,24 +163,19 @@ impl IntoIterator for TcError {
 
 // TODO: might get rid of FromIterator
 impl FromIterator<TcError> for TcError {
-    fn from_iter<T: IntoIterator<Item=TcError>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = TcError>>(iter: T) -> Self {
         TcError(
             iter.into_iter()
                 .map(|item| item.0.into_iter())
                 .flatten()
-                .collect::<Vec<_>>()
-
+                .collect::<Vec<_>>(),
         )
     }
 }
 
 impl FromIterator<TcErrorInner> for TcError {
-    fn from_iter<T: IntoIterator<Item=TcErrorInner>>(iter: T) -> Self {
-        TcError(
-            iter.into_iter()
-                .collect::<Vec<_>>()
-
-        )
+    fn from_iter<T: IntoIterator<Item = TcErrorInner>>(iter: T) -> Self {
+        TcError(iter.into_iter().collect::<Vec<_>>())
     }
 }
 
@@ -205,7 +199,6 @@ impl TypeChecker {
         }
     }
 
-
     pub fn tc_prog(&mut self, prog: &WithLoc<Program>) -> Result<()> {
         let mut errs = vec![];
 
@@ -215,9 +208,7 @@ impl TypeChecker {
 
         let err_fdefs = prog
             .iter()
-            .filter_map(|fdef| {
-                self.tc_fdef(fdef).err()
-            })
+            .filter_map(|fdef| self.tc_fdef(fdef).err())
             .map(|err| err.into_iter())
             .flatten()
             .collect::<Vec<_>>();
@@ -258,7 +249,7 @@ impl TypeChecker {
             if let Some(entry) = seen_params.get(param.0.as_str()) {
                 errs.push(TcErrorInner::new(
                     format!("duplicate formal parameter `{}`", entry.elem),
-                        param.0.loc,
+                    param.0.loc,
                 ))
             } else {
                 seen_params.insert(param.0.to_string(), param.0.clone());
@@ -269,22 +260,25 @@ impl TypeChecker {
         match returns_res {
             Err(err) => {
                 errs.extend(err);
-            },
-            Ok(None) => {
-                errs.push(TcErrorInner::new(
-                    format!("function `{}` is missing explicit `return` statement", fdef.name),
-                    fdef.loc,
-                ))
-            },
+            }
+            Ok(None) => errs.push(TcErrorInner::new(
+                format!(
+                    "function `{}` is missing explicit `return` statement",
+                    fdef.name
+                ),
+                fdef.loc,
+            )),
             Ok(Some(t)) => {
                 if t != *fdef.retty {
                     errs.push(TcErrorInner::new(
-                        format!("function `{}` returns type {}, expected {}", fdef.name, t, fdef.retty),
+                        format!(
+                            "function `{}` returns type {}, expected {}",
+                            fdef.name, t, fdef.retty
+                        ),
                         fdef.loc,
                     ))
                 }
             }
-
         }
 
         self.close_scope();
@@ -302,7 +296,6 @@ impl TypeChecker {
     // "recoverable" errors? by which I mean grabbing as many errors as possible in one go
     // for that we need to proceed even after a sub-call fails
     pub fn tc_block(&mut self, block: &WithLoc<Block>) -> Result<Option<Type>> {
-
         // open type-check scope
         // let sctx = self.s_ty_ctx.clone();
         // let b_sctx = ScopedTypeContext::new_scope(sctx.clone());
@@ -311,16 +304,15 @@ impl TypeChecker {
 
         let mut errs = vec![];
 
-        let returns = block.iter()
-            .fold(None, |returns, stmt| {
-                let stmt_returns = self.tc_stmt(stmt);
-                if let Err(err) = stmt_returns {
-                    errs.extend(err);
-                    return returns;
-                }
+        let returns = block.iter().fold(None, |returns, stmt| {
+            let stmt_returns = self.tc_stmt(stmt);
+            if let Err(err) = stmt_returns {
+                errs.extend(err);
+                return returns;
+            }
 
-                returns.or(stmt_returns.unwrap())
-            });
+            returns.or(stmt_returns.unwrap())
+        });
 
         // close type-check scope
         // self.s_ty_ctx = sctx;
@@ -368,7 +360,7 @@ impl TypeChecker {
                     errs.extend(err);
                     // Non-recoverable, since we don't know what type to assign to `v`.
                     // Actually, nevermind, this would be fixed by changing Res to (,)
-                    return Err(errs.into_iter().collect())
+                    return Err(errs.into_iter().collect());
                 }
 
                 let t_exp = t_exp_res.unwrap();
@@ -387,7 +379,7 @@ impl TypeChecker {
                         stmt.loc,
                     ));
                     // Non-recoverable, since it might cause cascading errors
-                    return Err(errs.into_iter().collect())
+                    return Err(errs.into_iter().collect());
                 }
 
                 let curr_ty = curr_ty.unwrap();
@@ -398,7 +390,7 @@ impl TypeChecker {
                 match t_exp_res {
                     Err(err) => {
                         errs.extend(err);
-                    },
+                    }
                     Ok(t) => {
                         if t != curr_ty {
                             errs.push(TcErrorInner::new(
@@ -411,17 +403,23 @@ impl TypeChecker {
 
                 None
             }
-            Stmt::IfElse { cond, if_branch, else_branch } => {
+            Stmt::IfElse {
+                cond,
+                if_branch,
+                else_branch,
+            } => {
                 let cond_t_res = self.tc_exp(cond);
                 match cond_t_res {
                     Err(err) => errs.extend(err),
-                    Ok(t) if t != Type::Bool => {
-                        errs.push(TcErrorInner::new(
-                            format!("if condition is of type `{}`, must be of type `{}`", t, Type::Bool),
-                            cond.loc,
-                        ))
-                    }
-                    _ => {},
+                    Ok(t) if t != Type::Bool => errs.push(TcErrorInner::new(
+                        format!(
+                            "if condition is of type `{}`, must be of type `{}`",
+                            t,
+                            Type::Bool
+                        ),
+                        cond.loc,
+                    )),
+                    _ => {}
                 }
 
                 // go on, treat cond as if it were a bool.
@@ -446,18 +444,20 @@ impl TypeChecker {
                 let else_ret = else_res.unwrap();
 
                 if_ret.and(else_ret)
-            },
+            }
             Stmt::While { cond, block } => {
                 let cond_t_res = self.tc_exp(cond);
                 match cond_t_res {
                     Err(err) => errs.extend(err),
-                    Ok(t) if t != Type::Bool => {
-                        errs.push(TcErrorInner::new(
-                            format!("while condition is of type `{}`, must be of type `{}`", t, Type::Bool),
-                            cond.loc,
-                        ))
-                    }
-                    _ => {},
+                    Ok(t) if t != Type::Bool => errs.push(TcErrorInner::new(
+                        format!(
+                            "while condition is of type `{}`, must be of type `{}`",
+                            t,
+                            Type::Bool
+                        ),
+                        cond.loc,
+                    )),
+                    _ => {}
                 }
 
                 // go on, treat cond as if it were a bool.
@@ -468,10 +468,10 @@ impl TypeChecker {
                     Err(err) => {
                         errs.extend(err);
                         None
-                    },
+                    }
                     Ok(t) => t,
                 }
-            },
+            }
         };
 
         if errs.len() > 0 {
@@ -489,15 +489,15 @@ impl TypeChecker {
                 let t = self.curr_s_ty_ctx.lookup(v.as_str());
                 match t {
                     None => Err(TcError::new(
-                                format!("variable `{}` used before declared", v),
-                                v.loc,
-                            )),
+                        format!("variable `{}` used before declared", v),
+                        v.loc,
+                    )),
                     Some(t) => Ok(t),
                 }
-            },
+            }
             Expr::Call(_name, _args) => {
                 todo!()
-            },
+            }
             Expr::BinOp(op, left, right) => {
                 let op_type = op.get_type();
                 // TODO: don't short-circuit yet, but collect *both* errors and then break out
@@ -506,15 +506,21 @@ impl TypeChecker {
 
                 let mut errs = vec![];
 
-                if op_type.0.0 != left_t {
+                if op_type.0 .0 != left_t {
                     errs.push(TcErrorInner::new(
-                        format!("first argument of `{}` is type `{}`, but must be type `{}`", op, left_t, op_type.0.0),
+                        format!(
+                            "first argument of `{}` is type `{}`, but must be type `{}`",
+                            op, left_t, op_type.0 .0
+                        ),
                         left.loc,
                     ))
                 }
-                if op_type.0.1 != right_t {
+                if op_type.0 .1 != right_t {
                     errs.push(TcErrorInner::new(
-                        format!("second argument of `{}` is type `{}`, but must be type `{}`", op, right_t, op_type.0.1),
+                        format!(
+                            "second argument of `{}` is type `{}`, but must be type `{}`",
+                            op, right_t, op_type.0 .1
+                        ),
                         right.loc,
                     ))
                 }
@@ -524,24 +530,26 @@ impl TypeChecker {
                 }
 
                 Ok(op_type.1)
-            },
+            }
             Expr::UnOp(op, inner) => {
                 let op_type = op.get_type();
                 let inner_t = self.tc_exp(inner)?;
 
                 if op_type.0 != inner_t {
                     return Err(TcError::new(
-                        format!("argument of `{}` is type {}, but must be type {}", op, inner_t, op_type.0),
+                        format!(
+                            "argument of `{}` is type {}, but must be type {}",
+                            op, inner_t, op_type.0
+                        ),
                         inner.loc,
                     ));
                 }
 
                 Ok(op_type.1)
-            },
+            }
         }
     }
 }
-
 
 // THESE ARE USED FOR THE PARSER AT THE MOMENT:
 
@@ -549,18 +557,34 @@ pub fn type_of(e: &Expr) -> Type {
     // Assumes the expression is type checked, then gives it a type.
     // The following implication holds:
     // Expression is typechecked ==> type_of(e) = it's actual, typechecked type
-    use Type::*;
     use BinOpcode::*;
+    use Type::*;
     use UnOpcode::*;
 
     match e {
         Expr::IntLit(_) => Int,
         Expr::BoolLit(_) => Bool,
-        Expr::Var(WithLoc { elem: Var(_, t), .. }) => *t,
+        Expr::Var(WithLoc {
+            elem: Var(_, t), ..
+        }) => *t,
         // TODO: Call needs global function type map
         Expr::Call(_, _) => panic!("Call not handled"),
-        Expr::BinOp(WithLoc { elem: Add | Sub | Mul | Div | Mod, .. }, _, _) => Int,
-        Expr::BinOp(WithLoc { elem: Eq | Ne | Lt | Gt | Le | Ge | And | Or, .. }, _, _) => Bool,
+        Expr::BinOp(
+            WithLoc {
+                elem: Add | Sub | Mul | Div | Mod,
+                ..
+            },
+            _,
+            _,
+        ) => Int,
+        Expr::BinOp(
+            WithLoc {
+                elem: Eq | Ne | Lt | Gt | Le | Ge | And | Or,
+                ..
+            },
+            _,
+            _,
+        ) => Bool,
         Expr::UnOp(WithLoc { elem: Neg, .. }, _) => Int,
         Expr::UnOp(WithLoc { elem: Not, .. }, _) => Bool,
     }

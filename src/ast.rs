@@ -75,7 +75,6 @@ impl Display for FuncDef {
 
         f.write_str(&format!("fn {}({}) {{\n{}}}", self.name, params, self.body))?;
 
-
         Ok(())
     }
 }
@@ -125,7 +124,7 @@ pub enum Stmt {
     While {
         cond: WithLoc<Expr>,
         block: WithLoc<Block>,
-    }
+    },
 }
 
 impl Stmt {
@@ -149,12 +148,15 @@ impl Display for Stmt {
             Return(e) => f.write_str(&format!("return {}", e)),
             Decl(v, e) => f.write_str(&format!("let {} = {}", v, e)),
             Assn(v, e) => f.write_str(&format!("{} = {}", v, e)),
-            IfElse { cond, if_branch, else_branch } => {
-                f.write_str(&format!("if {} {{\n{}}} else {{\n{}}}", cond, if_branch, else_branch))
-            },
-            While { cond, block } => {
-                f.write_str(&format!("while {} {{\n{}}}", cond, block))
-            },
+            IfElse {
+                cond,
+                if_branch,
+                else_branch,
+            } => f.write_str(&format!(
+                "if {} {{\n{}}} else {{\n{}}}",
+                cond, if_branch, else_branch
+            )),
+            While { cond, block } => f.write_str(&format!("while {} {{\n{}}}", cond, block)),
         }
     }
 }
@@ -170,7 +172,6 @@ pub enum Expr {
     Call(WithLoc<String>, Vec<WithLoc<Expr>>),
     BinOp(WithLoc<BinOpcode>, Box<WithLoc<Expr>>, Box<WithLoc<Expr>>),
     UnOp(WithLoc<UnOpcode>, Box<WithLoc<Expr>>),
-
     // Int(WithLoc<IntExpr>),
     // Bool(WithLoc<BoolExpr>),
 }
@@ -186,14 +187,15 @@ impl Expr {
                 let mut fv = HashSet::new();
                 fv.insert(v.elem.clone());
                 fv
-            },
-            Call(_, args) => args
-                    .into_iter()
+            }
+            Call(_, args) => {
+                args.into_iter()
                     .map(|arg| arg.free_vars())
                     .fold(HashSet::new(), |mut acc, fv| {
                         acc.extend(fv);
                         acc
-                    }),
+                    })
+            }
             BinOp(_, left, right) => {
                 let mut left_fv = left.free_vars();
                 let right_fv = right.free_vars();
@@ -206,16 +208,12 @@ impl Expr {
     }
 
     pub fn contains_bool_var(&self) -> bool {
-        
-
         match self {
             Expr::IntLit(_) | Expr::BoolLit(_) => false,
             Expr::Var(v) if v.is_bool() => true,
             Expr::Var(_) => false,
-            Expr::Call(_, args) =>
-                args.into_iter().any(|arg| arg.contains_bool_var()),
-            Expr::BinOp(_, left, right) =>
-                left.contains_bool_var() || right.contains_bool_var(),
+            Expr::Call(_, args) => args.into_iter().any(|arg| arg.contains_bool_var()),
+            Expr::BinOp(_, left, right) => left.contains_bool_var() || right.contains_bool_var(),
             Expr::UnOp(_, inner) => inner.contains_bool_var(),
         }
     }
@@ -232,12 +230,8 @@ impl Display for Expr {
             Call(name, args) => {
                 f.write_str(&format!("{}({})", name, sep_string_display(args, ", ")))
             }
-            BinOp(op, left, right) => {
-                f.write_str(&format!("({} {} {})", left, op, right))
-            }
-            UnOp(op, inner) => {
-                f.write_str(&format!("{}{}", op, inner))
-            }
+            BinOp(op, left, right) => f.write_str(&format!("({} {} {})", left, op, right)),
+            UnOp(op, inner) => f.write_str(&format!("{}{}", op, inner)),
         }
     }
 }
@@ -253,7 +247,8 @@ impl Display for Expr {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpcodeType<P>(pub P, pub Type)
-    where P: Debug + Clone + Copy + PartialEq + Eq;
+where
+    P: Debug + Clone + Copy + PartialEq + Eq;
 
 #[derive(Debug, Clone)]
 pub enum BinOpcode {
@@ -326,8 +321,8 @@ pub enum UnOpcode {
 
 impl UnOpcode {
     pub fn get_type(&self) -> OpcodeType<Type> {
-        use UnOpcode::*;
         use Type::*;
+        use UnOpcode::*;
 
         match self {
             Neg => OpcodeType(Int, Int),
@@ -411,17 +406,16 @@ pub struct Loc {
 }
 
 pub fn loc_from_offset(src: &str, offset: usize) -> Loc {
-    let (line, col) = src[0..offset].chars().fold((1, 1), |(line, col), curr_char| {
-        if curr_char == '\n' {
-            (line + 1, 1)
-        } else {
-            (line, col + 1)
-        }
-    });
-    Loc {
-        line,
-        col,
-    }
+    let (line, col) = src[0..offset]
+        .chars()
+        .fold((1, 1), |(line, col), curr_char| {
+            if curr_char == '\n' {
+                (line + 1, 1)
+            } else {
+                (line, col + 1)
+            }
+        });
+    Loc { line, col }
 }
 
 pub fn sep_string_display<T: Display>(elems: &Vec<T>, sep: &str) -> String {
@@ -435,4 +429,3 @@ pub fn sep_string_display<T: Display>(elems: &Vec<T>, sep: &str) -> String {
 
     res
 }
-

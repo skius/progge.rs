@@ -1,6 +1,6 @@
+pub mod ai;
 pub mod ast;
 pub mod ir;
-pub mod ai;
 pub mod tc;
 
 #[cfg(test)]
