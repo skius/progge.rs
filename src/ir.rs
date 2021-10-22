@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
+use std::rc::Rc;
 
 use petgraph::dot::Dot;
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -9,6 +10,7 @@ use IREdge::*;
 use IRNode::*;
 
 use crate::ast::*;
+use crate::tc::ScopedTypeContext;
 
 pub struct IntraProcCFG {
     pub graph: IntraGraph,
@@ -25,7 +27,7 @@ pub enum IRNode {
     IRSkip,
     IRDecl(Var, Expr),
     IRAssn(Var, Expr),
-    IRReturn(Expr),
+    IRReturn(Option<Expr>),
 
     IRCBranch(Expr),
     IRBranch,
@@ -39,7 +41,8 @@ impl IRNode {
                 fv.insert(v.clone());
                 fv
             }
-            IRReturn(e) => e.free_vars(),
+            IRReturn(Some(e)) => e.free_vars(),
+            IRReturn(None) => HashSet::new(),
             IRCBranch(e) => e.free_vars(),
             _ => HashSet::new(),
         }
@@ -54,7 +57,8 @@ impl Display for IRNode {
             IRSkip => f.write_str("skip"),
             IRDecl(v, e) => f.write_str(&format!("let {} = {}", v, e)),
             IRAssn(v, e) => f.write_str(&format!("{} = {}", v, e)),
-            IRReturn(e) => f.write_str(&format!("return {}", e)),
+            IRReturn(Some(e)) => f.write_str(&format!("return {}", e)),
+            IRReturn(None) => f.write_str(&format!("return")),
             IRCBranch(e) => f.write_str(&format!("<cbranch> {}", e)),
             IRBranch => f.write_str("<branch>"),
         }
@@ -99,8 +103,11 @@ fn add_block_to_graph(
                 }
                 prev_nodes = vec![(added, Fallthrough)];
             }
-            Stmt::Return(ref e) => {
-                let added = graph.add_node(IRReturn(e.elem.clone()));
+            Stmt::Return(ref e_opt) => {
+                let added = match e_opt {
+                    Some(e) => graph.add_node(IRReturn(Some(e.elem.clone()))),
+                    None => graph.add_node(IRReturn(None)),
+                };
                 for (prev_node, connect_prev) in &prev_nodes {
                     graph.add_edge(*prev_node, added, *connect_prev);
                 }
@@ -190,6 +197,12 @@ impl From<&FuncDef> for IntraProcCFG {
             params: f.params.clone(),
         }
     }
+}
+
+pub fn normalize_prog(mut prog: Program, mut scope: Rc<ScopedTypeContext>) -> Program {
+    // I need to know where each scope is
+
+    prog
 }
 
 // fn add_to_new(old_graph: &IntraGraph, graph: &mut IntraGraph, old_to_new: &mut HashMap<NodeIndex, NodeIndex>, old_idx: NodeIndex) -> NodeIndex {

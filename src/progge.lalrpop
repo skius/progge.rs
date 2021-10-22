@@ -110,7 +110,7 @@ pub StmtL = WithLoc<Stmt>;
 pub Stmt: Stmt = {
     "testcase!" => Stmt::Testcase(),
     "unreachable!" => Stmt::Unreachable(),
-    "return" <e:ExprL> => Stmt::Return(e),
+    "return" <e:ExprL?> => Stmt::Return(e),
     "let" <n:NameL> "=" <e:ExprL> => {
         let t = type_of(&e);
         let loc = n.loc;

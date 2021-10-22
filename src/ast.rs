@@ -6,6 +6,8 @@ use std::collections::HashSet;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::Deref;
 
+// TODO: change to loc_pre and loc_post, so we can use loc_post to say when something's missing,
+// e.g. when there's a missing explicit return
 #[derive(Debug, Clone)]
 pub struct WithLoc<T: Debug + Clone> {
     pub elem: T,
@@ -113,7 +115,7 @@ pub enum Stmt {
     // TODO: add optional params to testcase and unreachable, i.e. to name it?
     Testcase(),
     Unreachable(),
-    Return(WithLoc<Expr>),
+    Return(Option<WithLoc<Expr>>),
     Decl(WithLoc<Var>, WithLoc<Expr>),
     Assn(WithLoc<Var>, WithLoc<Expr>),
     IfElse {
@@ -145,7 +147,8 @@ impl Display for Stmt {
         match self {
             Testcase() => f.write_str("testcase!"),
             Unreachable() => f.write_str("unreachable!"),
-            Return(e) => f.write_str(&format!("return {}", e)),
+            Return(Some(e)) => f.write_str(&format!("return {}", e)),
+            Return(None) => f.write_str(&format!("return")),
             Decl(v, e) => f.write_str(&format!("let {} = {}", v, e)),
             Assn(v, e) => f.write_str(&format!("{} = {}", v, e)),
             IfElse {

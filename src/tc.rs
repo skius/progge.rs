@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::rc::{Rc, Weak};
+use petgraph::graph::DiGraph;
 
 use crate::ast::*;
 
@@ -83,6 +84,18 @@ impl ScopedTypeContext {
 
         None
     }
+
+    // pub fn depth(self: &Rc<ScopedTypeContext>) -> usize {
+    //     if let Some(parent) = self.parent.borrow().upgrade()
+    // }
+
+    // pub fn add_to_graph(self: &Rc<ScopedTypeContext>, graph: &mut DiGraph<&'static str, usize>) {
+    //     if let Some(parent) = self.parent.borrow().upgrade() {
+    //
+    //     }
+    // }
+    //
+    // pub fn graphviz(self: &Rc<ScopedTypeContext>) -> String {}
 }
 
 pub struct FuncTypeContext(HashMap<String, (Vec<Param>, Type)>);
@@ -243,7 +256,6 @@ impl TypeChecker {
         self.open_scope();
 
         fdef.params.iter().for_each(|param| {
-            // TODO: add params to tyctx
             self.curr_s_ty_ctx.insert(param.0.to_string(), *param.1);
 
             if let Some(entry) = seen_params.get(param.0.as_str()) {
@@ -256,7 +268,7 @@ impl TypeChecker {
             }
         });
 
-        let returns_res = self.tc_block(&fdef.body);
+        let returns_res = self.tc_block(&fdef.body, *fdef.retty);
         match returns_res {
             Err(err) => {
                 errs.extend(err);
@@ -272,7 +284,7 @@ impl TypeChecker {
                 if t != *fdef.retty {
                     errs.push(TcErrorInner::new(
                         format!(
-                            "function `{}` returns type {}, expected {}",
+                            "function `{}` returns type `{}`, expected `{}`",
                             fdef.name, t, fdef.retty
                         ),
                         fdef.loc,
@@ -295,17 +307,19 @@ impl TypeChecker {
     // TODO: maybe also change all Results to actually be tuples, because we're doing
     // "recoverable" errors? by which I mean grabbing as many errors as possible in one go
     // for that we need to proceed even after a sub-call fails
-    pub fn tc_block(&mut self, block: &WithLoc<Block>) -> Result<Option<Type>> {
+    pub fn tc_block(&mut self, block: &WithLoc<Block>, retty_expected: Type) -> Result<Option<Type>> {
         // open type-check scope
         // let sctx = self.s_ty_ctx.clone();
         // let b_sctx = ScopedTypeContext::new_scope(sctx.clone());
         // self.s_ty_ctx = b_sctx;
+        let prev_scope = self.curr_s_ty_ctx.clone();
         self.open_scope();
+
 
         let mut errs = vec![];
 
         let returns = block.iter().fold(None, |returns, stmt| {
-            let stmt_returns = self.tc_stmt(stmt);
+            let stmt_returns = self.tc_stmt(stmt, retty_expected);
             if let Err(err) = stmt_returns {
                 errs.extend(err);
                 return returns;
@@ -316,7 +330,8 @@ impl TypeChecker {
 
         // close type-check scope
         // self.s_ty_ctx = sctx;
-        self.close_scope();
+        // self.close_scope();
+        self.curr_s_ty_ctx = prev_scope;
 
         if errs.len() > 0 {
             return Err(errs.into_iter().collect());
@@ -325,36 +340,52 @@ impl TypeChecker {
         Ok(returns)
     }
 
-    pub fn tc_stmt(&mut self, stmt: &WithLoc<Stmt>) -> Result<Option<Type>> {
+    pub fn tc_stmt(&mut self, stmt: &WithLoc<Stmt>, retty_expected: Type) -> Result<Option<Type>> {
         let mut errs = vec![];
 
         let res = match &stmt.elem {
             Stmt::Testcase() => None,
             Stmt::Unreachable() => None,
             // TODO: typecheck that return is actually returning the correct type here, needs curr_fn string though
-            Stmt::Return(e) => Some(self.tc_exp(&e)?),
+            Stmt::Return(e_opt) => {
+                let (retty, loc)  = match e_opt {
+                    Some(e) => (self.tc_exp(&e)?, e.loc),
+                    None => (Type::Unit, stmt.loc),
+                };
+
+                if retty != retty_expected {
+                    return Err(TcError::new(
+                        format!("returning type `{}` but expected type `{}`", retty, retty_expected),
+                        loc,
+                    ));
+                }
+
+                Some(retty)
+            },
             Stmt::Decl(v, e) => {
                 // We allow redeclaring variables from outer scopes, but not in the same scope. hence we access
                 // only one level deep `var_type`s.
                 // let curr_ty = self.s_ty_ctx.deref().borrow_mut().var_type.get(v.as_str()).map(|t| *t);
-
                 // TODO:
                 // Actually, because allowing shadowed variables needs a bit of special handling when analyzing and we can't just assume same name == same var,
                 // we are not allowing redeclaring variables at all.
                 // Oh. but we are running into issues too because variables declared in different blocks work at the moment,
                 // it makes no sense to say redeclaration, but they cause issues because they have the same name.
-                let curr_ty = self.curr_s_ty_ctx.lookup(v.as_str());
+                // UPDATE: just do full variable shadowing. then instead of .close_scope at the end of a block,
+                // store the previous state and restore it after handling all statements.
 
-                if curr_ty.is_some() {
-                    errs.push(TcErrorInner::new(
-                        // format!("variable `{}` redeclared in current scope", v),
-                        format!("variable `{}` redeclared", v),
-                        stmt.loc,
-                    ));
-                    // Non-recoverable, since it might have cascading errors
-                    // nvm, want to continue for now.
-                    // return Err(errs.into_iter().collect())
-                }
+                // let curr_ty = self.curr_s_ty_ctx.lookup(v.as_str());
+                //
+                // if curr_ty.is_some() {
+                //     errs.push(TcErrorInner::new(
+                //         // format!("variable `{}` redeclared in current scope", v),
+                //         format!("variable `{}` redeclared", v),
+                //         stmt.loc,
+                //     ));
+                //     // Non-recoverable, since it might have cascading errors
+                //     // nvm, want to continue for now.
+                //     // return Err(errs.into_iter().collect())
+                // }
                 let t_exp_res = self.tc_exp(e);
                 if let Err(err) = t_exp_res {
                     errs.extend(err);
@@ -362,6 +393,9 @@ impl TypeChecker {
                     // Actually, nevermind, this would be fixed by changing Res to (,)
                     return Err(errs.into_iter().collect());
                 }
+
+                // let binding opens a new scope
+                self.open_scope();
 
                 let t_exp = t_exp_res.unwrap();
                 self.curr_s_ty_ctx.insert(v.to_string(), t_exp);
@@ -424,8 +458,8 @@ impl TypeChecker {
 
                 // go on, treat cond as if it were a bool.
 
-                let if_res = self.tc_block(if_branch);
-                let else_res = self.tc_block(else_branch);
+                let if_res = self.tc_block(if_branch, retty_expected);
+                let else_res = self.tc_block(else_branch, retty_expected);
 
                 // Check if either if_res or else_res has is an error. we want both errors, however
                 if let Err(err) = if_res.clone() {
@@ -462,11 +496,12 @@ impl TypeChecker {
 
                 // go on, treat cond as if it were a bool.
 
-                let block_res = self.tc_block(block);
+                let block_res = self.tc_block(block, retty_expected);
 
                 match block_res {
                     Err(err) => {
                         errs.extend(err);
+                        // arbitrary choice. has no effect:
                         None
                     }
                     Ok(t) => t,

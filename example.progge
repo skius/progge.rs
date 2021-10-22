@@ -7,15 +7,18 @@ fn analyze(x: int, y: int) -> int {
     // let outer = inner;
     /* test */
     let inner = 5;
-
-    if x < y && inner - 2 < 2 {
+    let inner = inner == 5;
+    if x < y && inner {
         while x < y {
             x = x + 1;
             y = y - 1;
         }
         let z = y - x;
+        let inner = 4;
         return z;
     }
+    inner = 59 < 0;
+    return 10;
 }
 
 fn main(x: int, y: int) -> int {
