@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use crate::ast::*;
 
 // Add proper type checking, with results, make use of Loc
@@ -17,53 +17,67 @@ use crate::ast::*;
  */
 
 pub struct ScopedTypeContext {
-    parent: Option<RRSTCtx>,
-    children: Vec<RRSTCtx>,
-    var_type: HashMap<String, Type>
+    parent: RefCell<Weak<ScopedTypeContext>>,
+    children: RefCell<Vec<Rc<ScopedTypeContext>>>,
+    var_type: RefCell<HashMap<String, Type>>,
 }
 
 type RRSTCtx = Rc<RefCell<ScopedTypeContext>>;
 
 impl ScopedTypeContext {
-    pub fn new() -> RRSTCtx {
-        Rc::new(RefCell::new(ScopedTypeContext {
-            parent: None,
-            children: vec![],
-            var_type: HashMap::new(),
-        }))
+    pub fn new() -> Rc<ScopedTypeContext> {
+        Rc::new(ScopedTypeContext {
+            parent: RefCell::new(Weak::new()),
+            children: RefCell::new(vec![]),
+            var_type: RefCell::new(HashMap::new()),
+        })
     }
 
     // pub fn get_parent(&self) -> &Option<RRSTCtx> {
     //     &self.parent
     // }
 
-    pub fn insert(&mut self, s: String, t: Type) {
-        self.var_type.insert(s, t);
+    pub fn insert(self: &Rc<ScopedTypeContext>, s: String, t: Type) {
+        self.var_type.borrow_mut().insert(s, t);
     }
 
-    pub fn new_scope(orig: RRSTCtx) -> RRSTCtx {
-        let new_ctx = ScopedTypeContext {
-            parent: Some(orig.clone()),
-            children: vec![],
-            var_type: HashMap::new(),
-        };
-        let ctx_rc = Rc::new(RefCell::new(new_ctx));
-        <RRSTCtx as Borrow<RefCell<Self>>>::borrow(&orig).borrow_mut().children.push(ctx_rc.clone());
-        ctx_rc
+    // pub fn new_scope(self: Rc<ScopedTypeContext>) -> Rc<ScopedTypeContext> {
+    //     let new_ctx = Rc::new(ScopedTypeContext {
+    //         parent: RefCell::new(Rc::downgrade(&self)),
+    //         children: RefCell::new(vec![]),
+    //         var_type: RefCell::new(HashMap::new()),
+    //     });
+    //     self.children.borrow_mut().push(new_ctx.clone());
+    //     new_ctx
+    // }
+    //
+    // pub fn close_scope(self: Rc<ScopedTypeContext>) -> Rc<ScopedTypeContext> {
+    //     self.parent.borrow().upgrade().unwrap()
+    // }
+
+    pub fn new_scope(self: &mut Rc<ScopedTypeContext>) {
+        let new_ctx = Rc::new(ScopedTypeContext {
+            parent: RefCell::new(Rc::downgrade(self)),
+            children: RefCell::new(vec![]),
+            var_type: RefCell::new(HashMap::new()),
+        });
+        self.children.borrow_mut().push(new_ctx.clone());
+        *self = new_ctx;
     }
 
-    pub fn close_scope(orig: RRSTCtx) -> RRSTCtx {
-        <RRSTCtx as Borrow<RefCell<Self>>>::borrow(&orig).borrow().parent.clone().unwrap()
+    pub fn close_scope(self: &mut Rc<ScopedTypeContext>) {
+        let parent = self.parent.borrow().upgrade().unwrap();
+        *self = parent;
     }
 
-    pub fn lookup(orig: RRSTCtx, s: &str) -> Option<Type> {
-        let mut curr = Some(orig);
+    pub fn lookup(self: &Rc<ScopedTypeContext>, s: &str) -> Option<Type> {
+        let mut curr = Some(self.clone());
 
         while let Some(ctx) = curr {
-            if let Some(t) = <RRSTCtx as Borrow<RefCell<Self>>>::borrow(&ctx).borrow_mut().var_type.get(s) {
-                return Some(*t);
+            if let Some(&t) = ctx.var_type.borrow().get(s) {
+                return Some(t);
             }
-            curr = <RRSTCtx as Borrow<RefCell<Self>>>::borrow(&ctx).borrow().parent.clone();
+            curr = ctx.parent.borrow().upgrade();
         }
 
         None
@@ -175,15 +189,18 @@ type Result<T> = core::result::Result<T, TcError>;
 pub struct TypeChecker {
     f_ty_ctx: FuncTypeContext,
     src_file: String,
-    s_ty_ctx: RRSTCtx,
+    curr_s_ty_ctx: Rc<ScopedTypeContext>,
+    root_s_ty_ctx: Rc<ScopedTypeContext>,
 }
 
 impl TypeChecker {
     pub fn new<S: AsRef<str>>(f_ty_ctx: FuncTypeContext, s: S) -> TypeChecker {
+        let s_ty_ctx = ScopedTypeContext::new();
         TypeChecker {
             f_ty_ctx,
             src_file: s.as_ref().to_string(),
-            s_ty_ctx: ScopedTypeContext::new(),
+            curr_s_ty_ctx: s_ty_ctx.clone(),
+            root_s_ty_ctx: s_ty_ctx,
         }
     }
 
@@ -214,13 +231,16 @@ impl TypeChecker {
 
     fn open_scope(&mut self) {
         // open type-check scope
-        let sctx = self.s_ty_ctx.clone();
-        let b_sctx = ScopedTypeContext::new_scope(sctx.clone());
-        self.s_ty_ctx = b_sctx;
+        self.curr_s_ty_ctx.new_scope();
+        // self.curr_s_ty_ctx = self.curr_s_ty_ctx.clone().new_scope();
+        // let sctx = self.s_ty_ctx.clone();
+        // let b_sctx = ScopedTypeContext::new_scope(sctx.clone());
+        // self.s_ty_ctx = b_sctx;
     }
 
     fn close_scope(&mut self) {
-        self.s_ty_ctx = ScopedTypeContext::close_scope(self.s_ty_ctx.clone());
+        // self.s_ty_ctx = ScopedTypeContext::close_scope(self.s_ty_ctx.clone());
+        self.curr_s_ty_ctx.close_scope();
     }
 
     pub fn tc_fdef(&mut self, fdef: &WithLoc<FuncDef>) -> Result<()> {
@@ -232,7 +252,7 @@ impl TypeChecker {
 
         fdef.params.iter().for_each(|param| {
             // TODO: add params to tyctx
-            self.s_ty_ctx.deref().borrow_mut().insert(param.0.to_string(), *param.1);
+            self.curr_s_ty_ctx.insert(param.0.to_string(), *param.1);
 
             if let Some(entry) = seen_params.get(param.0.as_str()) {
                 errs.push(TcErrorInner::new(
@@ -330,7 +350,7 @@ impl TypeChecker {
                 // we are not allowing redeclaring variables at all.
                 // Oh. but we are running into issues too because variables declared in different blocks work at the moment,
                 // it makes no sense to say redeclaration, but they cause issues because they have the same name.
-                let curr_ty = ScopedTypeContext::lookup(self.s_ty_ctx.clone(), v.as_str());
+                let curr_ty = self.curr_s_ty_ctx.lookup(v.as_str());
 
                 if curr_ty.is_some() {
                     errs.push(TcErrorInner::new(
@@ -351,7 +371,7 @@ impl TypeChecker {
                 }
 
                 let t_exp = t_exp_res.unwrap();
-                self.s_ty_ctx.deref().borrow_mut().insert(v.to_string(), t_exp);
+                self.curr_s_ty_ctx.insert(v.to_string(), t_exp);
                 // println!("inserted: {}", t_exp);
 
                 None
@@ -359,7 +379,7 @@ impl TypeChecker {
             Stmt::Assn(v, e) => {
                 // println!("in assn: {}", stmt);
 
-                let curr_ty = ScopedTypeContext::lookup(self.s_ty_ctx.clone(), v.as_str());
+                let curr_ty = self.curr_s_ty_ctx.lookup(v.as_str());
                 if curr_ty.is_none() {
                     errs.push(TcErrorInner::new(
                         format!("variable `{}` is assigned to before declared", v),
@@ -465,7 +485,7 @@ impl TypeChecker {
             Expr::IntLit(_) => Ok(Type::Int),
             Expr::BoolLit(_) => Ok(Type::Bool),
             Expr::Var(v) => {
-                let t = ScopedTypeContext::lookup(self.s_ty_ctx.clone(), v.as_str());
+                let t = self.curr_s_ty_ctx.lookup(v.as_str());
                 match t {
                     None => Err(TcError::new(
                                 format!("variable `{}` used before declared", v),
