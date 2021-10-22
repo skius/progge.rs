@@ -314,7 +314,7 @@ impl Display for UnOpcode {
 //     Binop(Box<BoolExpr>),
 // }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum Type {
     Int,
     Bool,

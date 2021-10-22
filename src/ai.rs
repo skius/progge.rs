@@ -23,7 +23,6 @@ pub fn graphviz_with_states<M: Manager>(
         if !state_map[&edge.id()].is_bottom(man) {
             let mut vars = env.keys().map(|v| v.as_str()).collect::<Vec<_>>();
             vars.sort();
-            // let vars = &["x", "res"];
             for v in vars {
                 intervals += &format!("{}: {:?}\\n", v, state_map[&edge.id()].get_bounds(man, env, v));
             }
@@ -69,7 +68,7 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
         free_vars.extend(irn.free_vars());
     }
 
-    let mut free_vars = free_vars.into_iter().map(|v| v.0).collect::<Vec<_>>();
+    let mut free_vars = free_vars.into_iter().filter(|v| v.is_int()).map(|v| v.0).collect::<Vec<_>>();
     free_vars.sort();
     println!("{:?}", free_vars);
     let env = Environment::new(free_vars);
