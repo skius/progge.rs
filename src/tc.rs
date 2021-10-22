@@ -19,7 +19,8 @@ use crate::ast::*;
 */
 
 pub struct ScopedTypeContext {
-    parent: RefCell<Weak<ScopedTypeContext>>,
+    // Wrap parent in RefCell if it turns out that it's needed.
+    parent: Weak<ScopedTypeContext>,
     children: RefCell<Vec<Rc<ScopedTypeContext>>>,
     var_type: RefCell<HashMap<String, Type>>,
 }
@@ -29,7 +30,7 @@ pub struct ScopedTypeContext {
 impl ScopedTypeContext {
     pub fn new() -> Rc<ScopedTypeContext> {
         Rc::new(ScopedTypeContext {
-            parent: RefCell::new(Weak::new()),
+            parent: Weak::new(),
             children: RefCell::new(vec![]),
             var_type: RefCell::new(HashMap::new()),
         })
@@ -59,7 +60,7 @@ impl ScopedTypeContext {
 
     pub fn new_scope(self: &mut Rc<ScopedTypeContext>) {
         let new_ctx = Rc::new(ScopedTypeContext {
-            parent: RefCell::new(Rc::downgrade(self)),
+            parent: Rc::downgrade(self),
             children: RefCell::new(vec![]),
             var_type: RefCell::new(HashMap::new()),
         });
