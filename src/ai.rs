@@ -1,10 +1,12 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+
 use elina::ast::{Abstract, Environment, Hcons, Manager, OptPkManager, Tcons, Texpr, TexprBinop, TexprUnop};
 use petgraph::Direction::{Incoming, Outgoing};
 use petgraph::dot::{Config, Dot};
 use petgraph::graph::{EdgeIndex, EdgeReference, node_index, NodeIndex};
 use petgraph::prelude::Dfs;
 use petgraph::visit::{EdgeRef, IntoEdges, Visitable};
+
 use crate::ast::{Expr, UnOpcode, WithLoc};
 use crate::ast::BinOpcode;
 use crate::ir::{IntraProcCFG, IREdge, IRNode};

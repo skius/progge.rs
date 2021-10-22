@@ -1,10 +1,11 @@
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::{Borrow};
 use std::cell::{Ref, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::rc::{Rc, Weak};
+
 use crate::ast::*;
 
 // Add proper type checking, with results, make use of Loc
@@ -22,7 +23,7 @@ pub struct ScopedTypeContext {
     var_type: RefCell<HashMap<String, Type>>,
 }
 
-type RRSTCtx = Rc<RefCell<ScopedTypeContext>>;
+// type RRSTCtx = Rc<RefCell<ScopedTypeContext>>;
 
 impl ScopedTypeContext {
     pub fn new() -> Rc<ScopedTypeContext> {
@@ -558,8 +559,8 @@ pub fn type_of(e: &Expr) -> Type {
         Expr::Var(WithLoc { elem: Var(_, t), .. }) => *t,
         // TODO: Call needs global function type map
         Expr::Call(_, _) => panic!("Call not handled"),
-        Expr::BinOp(WithLoc { elem: (Add | Sub | Mul | Div | Mod), .. }, _, _) => Int,
-        Expr::BinOp(WithLoc { elem: (Eq | Ne | Lt | Gt | Le | Ge | And | Or), .. }, _, _) => Bool,
+        Expr::BinOp(WithLoc { elem: Add | Sub | Mul | Div | Mod, .. }, _, _) => Int,
+        Expr::BinOp(WithLoc { elem: Eq | Ne | Lt | Gt | Le | Ge | And | Or, .. }, _, _) => Bool,
         Expr::UnOp(WithLoc { elem: Neg, .. }, _) => Int,
         Expr::UnOp(WithLoc { elem: Not, .. }, _) => Bool,
     }

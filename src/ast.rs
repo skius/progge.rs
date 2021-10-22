@@ -3,7 +3,7 @@
 
 use std::borrow::Borrow;
 use std::collections::HashSet;
-use std::fmt::{Debug, Display, Formatter, Write};
+use std::fmt::{Debug, Display, Formatter};
 use std::ops::Deref;
 
 #[derive(Debug, Clone)]
@@ -196,7 +196,7 @@ impl Expr {
                     }),
             BinOp(_, left, right) => {
                 let mut left_fv = left.free_vars();
-                let mut right_fv = right.free_vars();
+                let right_fv = right.free_vars();
                 left_fv.extend(right_fv);
 
                 left_fv

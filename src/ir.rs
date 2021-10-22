@@ -1,11 +1,16 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
+
 use petgraph::Direction;
 use petgraph::Direction::{Incoming, Outgoing};
 use petgraph::dot::{Config, Dot};
-use crate::ast::*;
 use petgraph::graph::{DiGraph, NodeIndex};
+
+use IREdge::*;
+use IRNode::*;
+
+use crate::ast::*;
 use crate::ast::Stmt::Testcase;
 
 pub struct IntraProcCFG {
@@ -15,9 +20,6 @@ pub struct IntraProcCFG {
 }
 
 type IntraGraph = DiGraph<IRNode, IREdge>;
-
-use IRNode::*;
-use IREdge::*;
 
 #[derive(Clone, Debug)]
 pub enum IRNode {
@@ -171,7 +173,7 @@ impl From<&FuncDef> for IntraProcCFG {
         let mut graph = DiGraph::new();
         let entry = graph.add_node(IRSkip);
 
-        let mut prev_node = entry;
+        let prev_node = entry;
         let exit_nodes = add_block_to_graph(&mut graph, &f.body, vec![(prev_node, Fallthrough)]);
 
         IntraProcCFG {

@@ -1,10 +1,9 @@
 #[macro_use] extern crate lalrpop_util;
 
 use std::fs::read_to_string;
-use std::ops::Deref;
-use std::str::from_utf8_unchecked;
+
 use proggers::ast::*;
-use proggers::ir::{IntraProcCFG};
+use proggers::ir::IntraProcCFG;
 use proggers::tc::{FuncTypeContext, TcError, TypeChecker, VariableTypeContext};
 
 lalrpop_mod!(pub progge); // synthesized by LALRPOP
@@ -18,7 +17,7 @@ fn main() -> Result<(), TcError> {
     let mut tctx = VariableTypeContext::new();
     let prog: WithLoc<Program> = progge::ProgramLParser::new().parse("example.progge", &src, &mut tctx, &src).unwrap();
 
-    dbg!(&prog);
+    // dbg!(&prog);
 
     println!("{}", prog);
 
