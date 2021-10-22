@@ -263,7 +263,7 @@ impl TypeChecker {
             }
             Ok(None) => errs.push(TcErrorInner::new(
                 format!(
-                    "function `{}` is missing explicit `return` statement",
+                    "function `{}` is missing an explicit `return` statement",
                     fdef.name
                 ),
                 fdef.loc,
