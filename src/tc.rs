@@ -86,9 +86,13 @@ impl ScopedTypeContext {
         None
     }
 
-    // pub fn depth(self: &Rc<ScopedTypeContext>) -> usize {
-    //     if let Some(parent) = self.parent.borrow().upgrade()
-    // }
+    pub fn depth(self: &Rc<ScopedTypeContext>) -> usize {
+        if let Some(parent) = self.parent.upgrade() {
+            1 + parent.depth()
+        } else {
+            0
+        }
+    }
 
     // pub fn add_to_graph(self: &Rc<ScopedTypeContext>, graph: &mut DiGraph<&'static str, usize>) {
     //     if let Some(parent) = self.parent.borrow().upgrade() {
