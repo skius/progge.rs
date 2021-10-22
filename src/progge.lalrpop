@@ -149,7 +149,8 @@ LeafExpr: Expr = {
  // TODO: instead of panicking, I could use a placeholder type here to complete the parse
         let t = tctx.lookup(&n).unwrap_or_else(|| {
             println!("{}:{}:{}: used variable \"{}\" before definition", filename, n.loc.line, n.loc.col, n.elem);
-            panic!("variable use before defined");
+            // panic!("variable use before defined");
+            Type::Unit
         });
         let loc = n.loc;
         Expr::Var(WithLoc { elem: Var(n.elem, t), loc: loc })

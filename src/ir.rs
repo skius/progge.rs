@@ -270,18 +270,3 @@ impl IntraProcCFG {
         format!("{}", Dot::with_config(&self.graph, &[]))
     }
 }
-
-
-
-
-pub fn do_stuff() {
-    // let x = IntraProcCFG(DiGraph::new());
-    // let mut x = x.0;
-    //
-    // let tc = x.add_node(IRTestcase);
-    // let tc2 = x.add_node(IRTestcase);
-    //
-    // // x.edges_directed(tc, Direction::Incoming);
-    //
-    // println!("{}", x.node_count());
-}

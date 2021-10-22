@@ -9,7 +9,8 @@ use crate::ast::{Expr, UnOpcode, WithLoc};
 use crate::ast::BinOpcode;
 use crate::ir::{IntraProcCFG, IREdge, IRNode};
 
-// TODO: free_vars should work with a HashSet
+// TODO: to counteract bool_vars causing imprecisions, add (optional) preprocessing step
+// that tries to inline all uses of bool vars. needs other static analyses first
 
 pub fn graphviz_with_states<M: Manager>(
     cfg: &IntraProcCFG,

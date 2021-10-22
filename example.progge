@@ -1,7 +1,12 @@
 fn analyze(x: int, y: int) -> int {
-    let unknown = false;
+    let outer = 5;
+    if true {
+        outer = 10;
+        let inner = 10;
+    }
+    let outer = inner;
 
-    if x < y && unknown {
+    if x < y && inner - 2 {
         while x < y {
             x = x + 1;
             y = y - 1;
@@ -9,10 +14,9 @@ fn analyze(x: int, y: int) -> int {
         let z = y - x;
         return z;
     }
-    return x;
 }
 
-fn masdsdin(x: int, x: int) {
+fn main(x: int, y: int) -> int {
     let res = 0;
     if x < 100 {
         testcase!;
@@ -27,5 +31,5 @@ fn masdsdin(x: int, x: int) {
 }
 
 fn ex(i: int) -> int {
-
+    return -1;
 }

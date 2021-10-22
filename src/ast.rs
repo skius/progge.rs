@@ -47,7 +47,7 @@ impl Display for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for fn_def in &**self {
             Display::fmt(fn_def, f)?;
-            f.write_str("\n")?;
+            f.write_str("\n\n")?;
         }
 
         Ok(())
@@ -242,6 +242,19 @@ impl Display for Expr {
     }
 }
 
+// #[allow(non_camel_case_types)]
+// pub enum OpcodeType {
+//     IntInt_Int,
+//     IntInt_Bool,
+//     BoolBool_Bool,
+//     Bool_Bool,
+//     Int_Int
+// }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpcodeType<P>(pub P, pub Type)
+    where P: Debug + Clone + Copy + PartialEq + Eq;
+
 #[derive(Debug, Clone)]
 pub enum BinOpcode {
     // int * int -> int
@@ -265,6 +278,19 @@ pub enum BinOpcode {
     // Actually, no, decided this is also int * int -> bool
     Eq,
     Ne,
+}
+
+impl BinOpcode {
+    pub fn get_type(&self) -> OpcodeType<(Type, Type)> {
+        use BinOpcode::*;
+        use Type::*;
+
+        match self {
+            Add | Sub | Mul | Div | Mod => OpcodeType((Int, Int), Int),
+            Lt | Le | Gt | Ge | Eq | Ne => OpcodeType((Int, Int), Bool),
+            _ => OpcodeType((Bool, Bool), Bool),
+        }
+    }
 }
 
 impl Display for BinOpcode {
@@ -296,6 +322,18 @@ pub enum UnOpcode {
 
     // bool -> bool
     Not,
+}
+
+impl UnOpcode {
+    pub fn get_type(&self) -> OpcodeType<(Type)> {
+        use UnOpcode::*;
+        use Type::*;
+
+        match self {
+            Neg => OpcodeType((Int), Int),
+            Not => OpcodeType((Bool), Bool),
+        }
+    }
 }
 
 impl Display for UnOpcode {

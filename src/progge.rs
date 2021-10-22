@@ -19,16 +19,15 @@ fn main() -> Result<(), TcError> {
     let prog: WithLoc<Program> = progge::ProgramLParser::new().parse("example.progge", &src, &mut tctx, &src).unwrap();
 
     dbg!(&prog);
-    proggers::ir::do_stuff();
 
     println!("{}", prog);
 
-    let main: IntraProcCFG = prog[0].deref().into();
-    println!("{}", main.graphviz());
+    // let main: IntraProcCFG = prog[0].deref().into();
+    // println!("{}", main.graphviz());
 
-    proggers::ai::run(&main);
+    // proggers::ai::run(&main);
 
-    let tc = TypeChecker::new(FuncTypeContext::from(&*prog), "example.progge");
+    let mut tc = TypeChecker::new(FuncTypeContext::from(&*prog), "example.progge");
     let res = tc.tc_prog(&prog);
     if let Err(err) = res {
         err.print_error_message("example.progge");
