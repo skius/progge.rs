@@ -1,7 +1,31 @@
 use std::collections::HashMap;
+use std::ops::Deref;
 use crate::ast::*;
 
 // Add proper type checking, with results, make use of Loc
+
+pub struct FuncTypeContext(HashMap<String, (Vec<Param>, Type)>);
+
+impl From<&Program> for FuncTypeContext {
+    fn from(p: &Program) -> Self {
+        let map = p.0.iter()
+            .map(|fd| (&*fd.name ,(&fd.params, &*fd.retty)))
+            .map(|(name, (params, retty))| {
+                (name.clone(), (params.clone(), retty.clone()))
+            })
+            .collect::<HashMap<_, _>>();
+
+        FuncTypeContext(map)
+    }
+}
+
+impl Deref for FuncTypeContext {
+    type Target = HashMap<String, (Vec<Param>, Type)>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 pub fn type_of(e: &Expr) -> Type {
     // Assumes the expression is type checked, then gives it a type.
