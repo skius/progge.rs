@@ -1,6 +1,7 @@
 // TODO: remove Loc everywhere, only add it to testcase! or where needed. Can still use later.
 // TODO: or use deref maybe?
 
+use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::fmt::{Debug, Display, Formatter, Write};
 use std::ops::Deref;
@@ -16,6 +17,12 @@ impl<T: Debug + Clone> Deref for WithLoc<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.elem
+    }
+}
+
+impl<T: Debug + Clone> Borrow<T> for WithLoc<T> {
+    fn borrow(&self) -> &T {
+        &*self
     }
 }
 

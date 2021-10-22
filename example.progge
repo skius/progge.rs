@@ -12,7 +12,7 @@ fn analyze(x: int, y: int) -> int {
     return x;
 }
 
-fn main(x: int) {
+fn masdsdin(x: int, x: int) {
     let res = 0;
     if x < 100 {
         testcase!;

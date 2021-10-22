@@ -5,11 +5,11 @@ use std::ops::Deref;
 use std::str::from_utf8_unchecked;
 use proggers::ast::*;
 use proggers::ir::{IntraProcCFG};
-use proggers::tc::VariableTypeContext;
+use proggers::tc::{FuncTypeContext, TcError, TypeChecker, VariableTypeContext};
 
 lalrpop_mod!(pub progge); // synthesized by LALRPOP
 
-fn main() {
+fn main() -> Result<(), TcError> {
     // TODO: Parsing idea. have a stack of hashmaps that store variable's types (akin to
     // de brujin indices), open a new one whenever you open a new scope. if you need to look up
     // a variable's type, you look first in the top hashmap, then go down.
@@ -28,6 +28,14 @@ fn main() {
 
     proggers::ai::run(&main);
 
+    let tc = TypeChecker::new(FuncTypeContext::from(&*prog), "example.progge");
+    let res = tc.tc_prog(&prog);
+    if let Err(err) = res {
+        err.print_error_message("example.progge");
+    }
+
     // let clean = remove_unnecessary_skips(&x);
     // println!("{}", clean.graphviz());
+
+    Ok(())
 }
