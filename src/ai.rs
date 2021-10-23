@@ -255,6 +255,8 @@ fn bool_expr_to_hcons(env: &Environment, expr: &Expr) -> Hcons {
         BoolLit(true) => Texpr::int(0).lt(Texpr::int(1)).into(),
         BoolLit(false) => Texpr::int(0).lt(Texpr::int(0)).into(),
         Var(_) => panic!("bool variables are unsupported at the moment"),
+        // TODO: make call just go to top by default, and maybe a second run where it utilizes
+        // a previous run's AI results.
         Call(_, _) => panic!("calls are unsupported at the moment"),
         BinOp(WithLoc { elem: op, .. }, left, right) => {
             // op must be int * int -> bool

@@ -16,6 +16,8 @@ use crate::ast::*;
    Make it a tree. i.e. have each scope be a node
    and the tree's "child_of" relation is "scope_contained_in" for scopes.
 
+    TODO: still need a way to refer to type checking results _after_ type checking.
+    currently variables store their Type, but do we need more?
 */
 
 pub struct ScopedTypeContext {
