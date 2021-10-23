@@ -4,7 +4,7 @@
 use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::fmt::{Debug, Display, Formatter};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 // TODO: change to loc_pre and loc_post, so we can use loc_post to say when something's missing,
 // e.g. when there's a missing explicit return
@@ -19,6 +19,12 @@ impl<T: Debug + Clone> Deref for WithLoc<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.elem
+    }
+}
+
+impl<T: Debug + Clone> DerefMut for WithLoc<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.elem
     }
 }
 
@@ -42,6 +48,12 @@ impl Deref for Program {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl DerefMut for Program {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -91,6 +103,12 @@ impl Deref for Block {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl DerefMut for Block {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -385,6 +403,10 @@ impl Var {
 
     pub fn is_int(&self) -> bool {
         self.1 == Type::Int
+    }
+
+    pub fn set_type(&mut self, t: Type) {
+        self.1 = t;
     }
 }
 

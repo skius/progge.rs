@@ -73,17 +73,36 @@ impl ScopedTypeContext {
         *self = parent;
     }
 
-    pub fn lookup(self: &Rc<ScopedTypeContext>, s: &str) -> Option<Type> {
+    fn lookup_and_where(self: &Rc<ScopedTypeContext>, s: &str) -> Option<(Type, Rc<ScopedTypeContext>)> {
         let mut curr = Some(self.clone());
 
         while let Some(ctx) = curr {
-            if let Some(&t) = ctx.var_type.borrow().get(s) {
-                return Some(t);
+            let entry = ctx.var_type.borrow().get(s).map(|t| *t);
+            if let Some(t) = entry {
+                return Some((t, ctx));
             }
             curr = ctx.parent.borrow().upgrade();
         }
 
         None
+    }
+
+    pub fn lookup(self: &Rc<ScopedTypeContext>, s: &str) -> Option<Type> {
+        self.lookup_and_where(s).map(|(t, _)| t)
+    }
+
+    pub fn depth_of_var(self: &Rc<ScopedTypeContext>, s: &str) -> Option<usize> {
+        match self.var_type.borrow().get(s) {
+            Some(_) => Some(1 + self.parent
+                .upgrade()
+                .and_then(|p| p.depth_of_var(s))
+                .unwrap_or(0)
+            ),
+            None => self.parent.upgrade().and_then(|p| p.depth_of_var(s))
+        }
+
+
+        // self.lookup_and_where(s).map(|(_, ctx)| ctx.depth())
     }
 
     pub fn depth(self: &Rc<ScopedTypeContext>) -> usize {
@@ -163,6 +182,10 @@ impl TcError {
         }])
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     pub fn print_error_message<S: AsRef<str>>(&self, src: S) {
         self.0
             .iter()
@@ -217,7 +240,9 @@ impl TypeChecker {
         }
     }
 
-    pub fn tc_prog(&mut self, prog: &WithLoc<Program>) -> Result<()> {
+    // If we don't want to mutate the prog while typechecking, an alternative could really be to
+    // just redo a pass with the same scoping rules, but that doesn't seem DRY
+    pub fn tc_prog(&mut self, prog: &mut WithLoc<Program>) -> Result<()> {
         let mut errs = vec![];
 
         if !self.f_ty_ctx.contains_key("main") {
@@ -225,7 +250,7 @@ impl TypeChecker {
         }
 
         let err_fdefs = prog
-            .iter()
+            .iter_mut()
             .filter_map(|fdef| self.tc_fdef(fdef).err())
             .map(|err| err.into_iter())
             .flatten()
@@ -253,15 +278,25 @@ impl TypeChecker {
         self.curr_s_ty_ctx.close_scope();
     }
 
-    pub fn tc_fdef(&mut self, fdef: &WithLoc<FuncDef>) -> Result<()> {
+    fn disambig_var(&mut self, v: &mut Var) {
+        let depth = self.curr_s_ty_ctx.depth_of_var(v.as_str()).unwrap();
+        if depth != 1 {
+            v.0.push_str(&format!("_{}", depth));
+        }
+    }
+
+    pub fn tc_fdef(&mut self, fdef: &mut WithLoc<FuncDef>) -> Result<()> {
         let mut errs = vec![];
 
         let mut seen_params: HashMap<String, WithLoc<Var>> = HashMap::new();
 
-        self.open_scope();
+        // self.open_scope();
 
-        fdef.params.iter().for_each(|param| {
+        fdef.params.iter_mut().for_each(|param| {
             self.curr_s_ty_ctx.insert(param.0.to_string(), *param.1);
+
+            self.disambig_var(&mut param.0);
+            param.0.set_type(*param.1);
 
             if let Some(entry) = seen_params.get(param.0.as_str()) {
                 errs.push(TcErrorInner::new(
@@ -273,7 +308,8 @@ impl TypeChecker {
             }
         });
 
-        let returns_res = self.tc_block(&fdef.body, *fdef.retty);
+        let retty_expected = *fdef.retty;
+        let returns_res = self.tc_block(&mut fdef.body, retty_expected);
         match returns_res {
             Err(err) => {
                 errs.extend(err);
@@ -298,7 +334,7 @@ impl TypeChecker {
             }
         }
 
-        self.close_scope();
+        // self.close_scope();
 
         if errs.len() > 0 {
             return Err(errs.into_iter().collect());
@@ -312,7 +348,7 @@ impl TypeChecker {
     // TODO: maybe also change all Results to actually be tuples, because we're doing
     // "recoverable" errors? by which I mean grabbing as many errors as possible in one go
     // for that we need to proceed even after a sub-call fails
-    pub fn tc_block(&mut self, block: &WithLoc<Block>, retty_expected: Type) -> Result<Option<Type>> {
+    pub fn tc_block(&mut self, block: &mut WithLoc<Block>, retty_expected: Type) -> Result<Option<Type>> {
         // open type-check scope
         // let sctx = self.s_ty_ctx.clone();
         // let b_sctx = ScopedTypeContext::new_scope(sctx.clone());
@@ -323,7 +359,7 @@ impl TypeChecker {
 
         let mut errs = vec![];
 
-        let returns = block.iter().fold(None, |returns, stmt| {
+        let returns = block.iter_mut().fold(None, |returns, stmt| {
             let stmt_returns = self.tc_stmt(stmt, retty_expected);
             if let Err(err) = stmt_returns {
                 errs.extend(err);
@@ -345,16 +381,16 @@ impl TypeChecker {
         Ok(returns)
     }
 
-    pub fn tc_stmt(&mut self, stmt: &WithLoc<Stmt>, retty_expected: Type) -> Result<Option<Type>> {
+    pub fn tc_stmt(&mut self, stmt: &mut WithLoc<Stmt>, retty_expected: Type) -> Result<Option<Type>> {
         let mut errs = vec![];
 
-        let res = match &stmt.elem {
+        let res = match &mut stmt.elem {
             Stmt::Testcase() => None,
             Stmt::Unreachable() => None,
             // TODO: typecheck that return is actually returning the correct type here, needs curr_fn string though
             Stmt::Return(e_opt) => {
                 let (retty, loc)  = match e_opt {
-                    Some(e) => (self.tc_exp(&e)?, e.loc),
+                    Some(e) => (self.tc_exp(e)?, e.loc),
                     None => (Type::Unit, stmt.loc),
                 };
 
@@ -405,7 +441,8 @@ impl TypeChecker {
                 let t_exp = t_exp_res.unwrap();
                 self.curr_s_ty_ctx.insert(v.to_string(), t_exp);
                 // println!("inserted: {}", t_exp);
-
+                self.disambig_var(&mut *v);
+                v.set_type(t_exp);
                 None
             }
             Stmt::Assn(v, e) => {
@@ -431,6 +468,7 @@ impl TypeChecker {
                         errs.extend(err);
                     }
                     Ok(t) => {
+                        v.set_type(t);
                         if t != curr_ty {
                             errs.push(TcErrorInner::new(
                                 format!("type `{}` of expression doesn't match type `{}` of variable `{}`", t, curr_ty, v),
@@ -440,6 +478,7 @@ impl TypeChecker {
                     }
                 }
 
+                self.disambig_var(&mut *v);
                 None
             }
             Stmt::IfElse {
@@ -521,8 +560,8 @@ impl TypeChecker {
         Ok(res)
     }
 
-    pub fn tc_exp(&mut self, exp: &WithLoc<Expr>) -> Result<Type> {
-        match &exp.elem {
+    pub fn tc_exp(&mut self, exp: &mut WithLoc<Expr>) -> Result<Type> {
+        match &mut exp.elem {
             Expr::IntLit(_) => Ok(Type::Int),
             Expr::BoolLit(_) => Ok(Type::Bool),
             Expr::Var(v) => {
@@ -532,11 +571,48 @@ impl TypeChecker {
                         format!("variable `{}` used before declared", v),
                         v.loc,
                     )),
-                    Some(t) => Ok(t),
+                    Some(t) => {
+                        self.disambig_var(&mut *v);
+                        v.set_type(t);
+                        Ok(t)
+                    },
                 }
             }
-            Expr::Call(_name, _args) => {
-                todo!()
+            Expr::Call(name, args) => {
+                let (param_tys, retty) = &self.f_ty_ctx[name.as_str()];
+                let retty = *retty;
+
+                let params_len = param_tys.len();
+                let args_len = args.len();
+
+                if params_len != args_len {
+                    // Returning, because it makes no sense to typecheck unmatching iters.. or does it?
+                    return Err(TcError::new(
+                        format!("argument count mismatch for call to `{}`: {} args given but function expects {}", name, args_len, params_len),
+                        exp.loc,
+                    ))
+                }
+
+                let param_tys = param_tys.iter().map(|p| *p.1).collect::<Vec<_>>();
+
+                let err = param_tys.into_iter().zip(args.iter_mut()).map(|(param_t, arg)| {
+                    let arg_t = self.tc_exp(arg)?;
+
+                    if arg_t != param_t {
+                        return Err(TcError::new(
+                            format!("argument type mismatch for call to `{}`: expected type `{}` got type `{}`", name, param_t, arg_t),
+                            arg.loc,
+                        ))
+                    }
+
+                    Ok(())
+                }).filter_map(|res| res.err()).collect::<TcError>();
+
+                if !err.is_empty() {
+                    Err(err)
+                } else {
+                    Ok(retty)
+                }
             }
             Expr::BinOp(op, left, right) => {
                 let op_type = op.get_type();
@@ -608,7 +684,8 @@ pub fn type_of(e: &Expr) -> Type {
             elem: Var(_, t), ..
         }) => *t,
         // TODO: Call needs global function type map
-        Expr::Call(_, _) => panic!("Call not handled"),
+        // we're kind of not caring about type_of.
+        Expr::Call(_, _) => Unit,
         Expr::BinOp(
             WithLoc {
                 elem: Add | Sub | Mul | Div | Mod,

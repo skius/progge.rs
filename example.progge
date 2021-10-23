@@ -17,6 +17,7 @@ fn analyze(x: int, y: int) -> int {
         let inner = 4;
         return z;
     }
+    let call = ex(5 - 5 == 5, 2);
     inner = 59 < 0;
     return 10;
 }
@@ -35,6 +36,6 @@ fn main(x: int, y: int) -> int {
 
 }
 
-fn ex(i: int) -> int {
+fn ex(i: int, o: bool) -> int {
     return -1;
 }
