@@ -1,4 +1,4 @@
-use std::borrow::Borrow;
+use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -34,12 +34,13 @@ impl ScopedTypeContext {
             children: RefCell::new(vec![]),
             var_type: RefCell::new(HashMap::new()),
             var_name: RefCell::new(HashMap::new()),
+            // Only keeps track of current function
             var_counts: Rc::new(RefCell::new(HashMap::new())),
         })
     }
 
     pub fn insert(self: &Rc<ScopedTypeContext>, s: String, t: Type) {
-        *self.var_counts.borrow_mut().entry(s.clone()).or_insert(0) += 1;
+        *self.var_counts.deref().borrow_mut().entry(s.clone()).or_insert(0) += 1;
         let count = *self.var_counts.deref().borrow().get(s.as_str()).unwrap();
         self.var_type.borrow_mut().insert(s.clone(), t);
         // let depth = self.depth_of_var(s.as_str()).unwrap();
@@ -51,6 +52,10 @@ impl ScopedTypeContext {
 
         self.var_name.borrow_mut().insert(s.clone(), name);
 
+    }
+
+    pub fn clear_var_count(self: &Rc<ScopedTypeContext>) {
+        self.var_counts.deref().borrow_mut().clear();
     }
 
     pub fn new_scope(self: &mut Rc<ScopedTypeContext>) {
@@ -289,7 +294,8 @@ impl TypeChecker {
 
     pub fn tc_fdef(&mut self, fdef: &mut WithLoc<FuncDef>) -> Result<()> {
         let mut errs = vec![];
-
+        // reset var counts, completely different scope.
+        self.curr_s_ty_ctx.clear_var_count();
         let mut seen_params: HashMap<String, WithLoc<Var>> = HashMap::new();
 
         // self.open_scope();
