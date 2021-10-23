@@ -1,16 +1,37 @@
 fn analyze(x: int, y: int) -> int {
-    if x < y + 5000 {
+    // let outer = 5;
+    // if true {
+    //     outer = 10;
+    //     let inner = 10;
+    // }
+    // let outer = inner;
+    /* test */
+    if true {
+        let not_the_same = 5;
+    }
+
+    if true {
+        let not_the_same = true;
+    }
+
+
+    let inner = 5;
+    let inner = inner == 5;
+    if x < y && inner {
         while x < y {
             x = x + 1;
             y = y - 1;
         }
         let z = y - x;
+        let inner = 4;
         return z;
     }
-    return 0;
+    // let call = ex(5 - 5 == 5, 2);
+    inner = 59 < 0;
+    return 10;
 }
 
-fn main(x: int) {
+fn main(x: int, y: int) -> int {
     let res = 0;
     if x < 100 {
         testcase!;
@@ -24,6 +45,6 @@ fn main(x: int) {
 
 }
 
-fn ex(i: int) -> int {
-
+fn ex(i: int, o: bool) -> int {
+    return -1;
 }

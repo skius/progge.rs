@@ -1,12 +1,16 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
-use petgraph::Direction;
-use petgraph::Direction::{Incoming, Outgoing};
-use petgraph::dot::{Config, Dot};
-use crate::ast::*;
+use std::rc::Rc;
+
+use petgraph::dot::Dot;
 use petgraph::graph::{DiGraph, NodeIndex};
-use crate::ast::Stmt::Testcase;
+
+use IREdge::*;
+use IRNode::*;
+
+use crate::ast::*;
+use crate::tc::ScopedTypeContext;
 
 pub struct IntraProcCFG {
     pub graph: IntraGraph,
@@ -16,9 +20,6 @@ pub struct IntraProcCFG {
 
 type IntraGraph = DiGraph<IRNode, IREdge>;
 
-use IRNode::*;
-use IREdge::*;
-
 #[derive(Clone, Debug)]
 pub enum IRNode {
     IRTestcase,
@@ -26,7 +27,7 @@ pub enum IRNode {
     IRSkip,
     IRDecl(Var, Expr),
     IRAssn(Var, Expr),
-    IRReturn(Expr),
+    IRReturn(Option<Expr>),
 
     IRCBranch(Expr),
     IRBranch,
@@ -39,8 +40,9 @@ impl IRNode {
                 let mut fv = e.free_vars();
                 fv.insert(v.clone());
                 fv
-            },
-            IRReturn(e) => e.free_vars(),
+            }
+            IRReturn(Some(e)) => e.free_vars(),
+            IRReturn(None) => HashSet::new(),
             IRCBranch(e) => e.free_vars(),
             _ => HashSet::new(),
         }
@@ -55,7 +57,8 @@ impl Display for IRNode {
             IRSkip => f.write_str("skip"),
             IRDecl(v, e) => f.write_str(&format!("let {} = {}", v, e)),
             IRAssn(v, e) => f.write_str(&format!("{} = {}", v, e)),
-            IRReturn(e) => f.write_str(&format!("return {}", e)),
+            IRReturn(Some(e)) => f.write_str(&format!("return {}", e)),
+            IRReturn(None) => f.write_str(&format!("return")),
             IRCBranch(e) => f.write_str(&format!("<cbranch> {}", e)),
             IRBranch => f.write_str("<branch>"),
         }
@@ -79,7 +82,11 @@ impl Display for IREdge {
     }
 }
 
-fn add_block_to_graph(graph: &mut IntraGraph, block: &Block, mut prev_nodes: Vec<(NodeIndex, IREdge)>) -> Vec<(NodeIndex, IREdge)> {
+fn add_block_to_graph(
+    graph: &mut IntraGraph,
+    block: &Block,
+    mut prev_nodes: Vec<(NodeIndex, IREdge)>,
+) -> Vec<(NodeIndex, IREdge)> {
     for stm in &**block {
         match **stm {
             Stmt::Testcase() => {
@@ -96,8 +103,11 @@ fn add_block_to_graph(graph: &mut IntraGraph, block: &Block, mut prev_nodes: Vec
                 }
                 prev_nodes = vec![(added, Fallthrough)];
             }
-            Stmt::Return(ref e) => {
-                let added = graph.add_node(IRReturn(e.elem.clone()));
+            Stmt::Return(ref e_opt) => {
+                let added = match e_opt {
+                    Some(e) => graph.add_node(IRReturn(Some(e.elem.clone()))),
+                    None => graph.add_node(IRReturn(None)),
+                };
                 for (prev_node, connect_prev) in &prev_nodes {
                     graph.add_edge(*prev_node, added, *connect_prev);
                 }
@@ -118,7 +128,11 @@ fn add_block_to_graph(graph: &mut IntraGraph, block: &Block, mut prev_nodes: Vec
                 }
                 prev_nodes = vec![(added, Fallthrough)];
             }
-            Stmt::IfElse { ref cond, ref if_branch, ref else_branch } => {
+            Stmt::IfElse {
+                ref cond,
+                ref if_branch,
+                ref else_branch,
+            } => {
                 let branch = graph.add_node(IRCBranch(cond.deref().clone()));
                 for (prev_node, connect_prev) in &prev_nodes {
                     graph.add_edge(*prev_node, branch, *connect_prev);
@@ -130,13 +144,16 @@ fn add_block_to_graph(graph: &mut IntraGraph, block: &Block, mut prev_nodes: Vec
                 // graph.add_edge(branch, else_root, NotTaken);
 
                 let mut prev_nodes_if = add_block_to_graph(graph, if_branch, vec![(branch, Taken)]);
-                let mut prev_nodes_else = add_block_to_graph(graph, else_branch, vec![(branch, NotTaken)]);
+                let mut prev_nodes_else =
+                    add_block_to_graph(graph, else_branch, vec![(branch, NotTaken)]);
 
                 prev_nodes_if.append(&mut prev_nodes_else);
                 prev_nodes = prev_nodes_if;
             }
-            Stmt::While { ref cond, ref block } => {
-
+            Stmt::While {
+                ref cond,
+                ref block,
+            } => {
                 // prev -> branch -TRUE-> block_root -> ...block... |
                 //          | /\-------------------------------------
                 //          |
@@ -171,8 +188,8 @@ impl From<&FuncDef> for IntraProcCFG {
         let mut graph = DiGraph::new();
         let entry = graph.add_node(IRSkip);
 
-        let mut prev_node = entry;
-        let exit_nodes = add_block_to_graph(&mut graph, &f.body, vec![(prev_node, Fallthrough)]);
+        let prev_node = entry;
+        let _exit_nodes = add_block_to_graph(&mut graph, &f.body, vec![(prev_node, Fallthrough)]);
 
         IntraProcCFG {
             graph,
@@ -180,6 +197,12 @@ impl From<&FuncDef> for IntraProcCFG {
             params: f.params.clone(),
         }
     }
+}
+
+pub fn normalize_prog(mut prog: Program, mut scope: Rc<ScopedTypeContext>) -> Program {
+    // I need to know where each scope is
+
+    prog
 }
 
 // fn add_to_new(old_graph: &IntraGraph, graph: &mut IntraGraph, old_to_new: &mut HashMap<NodeIndex, NodeIndex>, old_idx: NodeIndex) -> NodeIndex {
@@ -269,19 +292,4 @@ impl IntraProcCFG {
     pub fn graphviz(&self) -> String {
         format!("{}", Dot::with_config(&self.graph, &[]))
     }
-}
-
-
-
-
-pub fn do_stuff() {
-    // let x = IntraProcCFG(DiGraph::new());
-    // let mut x = x.0;
-    //
-    // let tc = x.add_node(IRTestcase);
-    // let tc2 = x.add_node(IRTestcase);
-    //
-    // // x.edges_directed(tc, Direction::Incoming);
-    //
-    // println!("{}", x.node_count());
 }

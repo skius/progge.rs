@@ -1,10 +1,13 @@
 // TODO: remove Loc everywhere, only add it to testcase! or where needed. Can still use later.
 // TODO: or use deref maybe?
 
+use std::borrow::Borrow;
 use std::collections::HashSet;
-use std::fmt::{Debug, Display, Formatter, Write};
-use std::ops::Deref;
+use std::fmt::{Debug, Display, Formatter};
+use std::ops::{Deref, DerefMut};
 
+// TODO: change to loc_pre and loc_post, so we can use loc_post to say when something's missing,
+// e.g. when there's a missing explicit return
 #[derive(Debug, Clone)]
 pub struct WithLoc<T: Debug + Clone> {
     pub elem: T,
@@ -16,6 +19,18 @@ impl<T: Debug + Clone> Deref for WithLoc<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.elem
+    }
+}
+
+impl<T: Debug + Clone> DerefMut for WithLoc<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.elem
+    }
+}
+
+impl<T: Debug + Clone> Borrow<T> for WithLoc<T> {
+    fn borrow(&self) -> &T {
+        &*self
     }
 }
 
@@ -36,11 +51,17 @@ impl Deref for Program {
     }
 }
 
+impl DerefMut for Program {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 impl Display for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for fn_def in &**self {
             Display::fmt(fn_def, f)?;
-            f.write_str("\n")?;
+            f.write_str("\n\n")?;
         }
 
         Ok(())
@@ -68,7 +89,6 @@ impl Display for FuncDef {
 
         f.write_str(&format!("fn {}({}) {{\n{}}}", self.name, params, self.body))?;
 
-
         Ok(())
     }
 }
@@ -83,6 +103,12 @@ impl Deref for Block {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl DerefMut for Block {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -107,7 +133,7 @@ pub enum Stmt {
     // TODO: add optional params to testcase and unreachable, i.e. to name it?
     Testcase(),
     Unreachable(),
-    Return(WithLoc<Expr>),
+    Return(Option<WithLoc<Expr>>),
     Decl(WithLoc<Var>, WithLoc<Expr>),
     Assn(WithLoc<Var>, WithLoc<Expr>),
     IfElse {
@@ -118,7 +144,7 @@ pub enum Stmt {
     While {
         cond: WithLoc<Expr>,
         block: WithLoc<Block>,
-    }
+    },
 }
 
 impl Stmt {
@@ -139,15 +165,19 @@ impl Display for Stmt {
         match self {
             Testcase() => f.write_str("testcase!"),
             Unreachable() => f.write_str("unreachable!"),
-            Return(e) => f.write_str(&format!("return {}", e)),
+            Return(Some(e)) => f.write_str(&format!("return {}", e)),
+            Return(None) => f.write_str(&format!("return")),
             Decl(v, e) => f.write_str(&format!("let {} = {}", v, e)),
             Assn(v, e) => f.write_str(&format!("{} = {}", v, e)),
-            IfElse { cond, if_branch, else_branch } => {
-                f.write_str(&format!("if {} {{\n{}}} else {{\n{}}}", cond, if_branch, else_branch))
-            },
-            While { cond, block } => {
-                f.write_str(&format!("while {} {{\n{}}}", cond, block))
-            },
+            IfElse {
+                cond,
+                if_branch,
+                else_branch,
+            } => f.write_str(&format!(
+                "if {} {{\n{}}} else {{\n{}}}",
+                cond, if_branch, else_branch
+            )),
+            While { cond, block } => f.write_str(&format!("while {} {{\n{}}}", cond, block)),
         }
     }
 }
@@ -163,7 +193,6 @@ pub enum Expr {
     Call(WithLoc<String>, Vec<WithLoc<Expr>>),
     BinOp(WithLoc<BinOpcode>, Box<WithLoc<Expr>>, Box<WithLoc<Expr>>),
     UnOp(WithLoc<UnOpcode>, Box<WithLoc<Expr>>),
-
     // Int(WithLoc<IntExpr>),
     // Bool(WithLoc<BoolExpr>),
 }
@@ -179,22 +208,34 @@ impl Expr {
                 let mut fv = HashSet::new();
                 fv.insert(v.elem.clone());
                 fv
-            },
-            Call(_, args) => args
-                    .into_iter()
+            }
+            Call(_, args) => {
+                args.into_iter()
                     .map(|arg| arg.free_vars())
                     .fold(HashSet::new(), |mut acc, fv| {
                         acc.extend(fv);
                         acc
-                    }),
+                    })
+            }
             BinOp(_, left, right) => {
                 let mut left_fv = left.free_vars();
-                let mut right_fv = right.free_vars();
+                let right_fv = right.free_vars();
                 left_fv.extend(right_fv);
 
                 left_fv
             }
             UnOp(_, inner) => inner.free_vars(),
+        }
+    }
+
+    pub fn contains_bool_var(&self) -> bool {
+        match self {
+            Expr::IntLit(_) | Expr::BoolLit(_) => false,
+            Expr::Var(v) if v.is_bool() => true,
+            Expr::Var(_) => false,
+            Expr::Call(_, args) => args.into_iter().any(|arg| arg.contains_bool_var()),
+            Expr::BinOp(_, left, right) => left.contains_bool_var() || right.contains_bool_var(),
+            Expr::UnOp(_, inner) => inner.contains_bool_var(),
         }
     }
 }
@@ -210,15 +251,25 @@ impl Display for Expr {
             Call(name, args) => {
                 f.write_str(&format!("{}({})", name, sep_string_display(args, ", ")))
             }
-            BinOp(op, left, right) => {
-                f.write_str(&format!("({} {} {})", left, op, right))
-            }
-            UnOp(op, inner) => {
-                f.write_str(&format!("{}{}", op, inner))
-            }
+            BinOp(op, left, right) => f.write_str(&format!("({} {} {})", left, op, right)),
+            UnOp(op, inner) => f.write_str(&format!("{}{}", op, inner)),
         }
     }
 }
+
+// #[allow(non_camel_case_types)]
+// pub enum OpcodeType {
+//     IntInt_Int,
+//     IntInt_Bool,
+//     BoolBool_Bool,
+//     Bool_Bool,
+//     Int_Int
+// }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpcodeType<P>(pub P, pub Type)
+where
+    P: Debug + Clone + Copy + PartialEq + Eq;
 
 #[derive(Debug, Clone)]
 pub enum BinOpcode {
@@ -243,6 +294,19 @@ pub enum BinOpcode {
     // Actually, no, decided this is also int * int -> bool
     Eq,
     Ne,
+}
+
+impl BinOpcode {
+    pub fn get_type(&self) -> OpcodeType<(Type, Type)> {
+        use BinOpcode::*;
+        use Type::*;
+
+        match self {
+            Add | Sub | Mul | Div | Mod => OpcodeType((Int, Int), Int),
+            Lt | Le | Gt | Ge | Eq | Ne => OpcodeType((Int, Int), Bool),
+            _ => OpcodeType((Bool, Bool), Bool),
+        }
+    }
 }
 
 impl Display for BinOpcode {
@@ -276,6 +340,18 @@ pub enum UnOpcode {
     Not,
 }
 
+impl UnOpcode {
+    pub fn get_type(&self) -> OpcodeType<Type> {
+        use Type::*;
+        use UnOpcode::*;
+
+        match self {
+            Neg => OpcodeType(Int, Int),
+            Not => OpcodeType(Bool, Bool),
+        }
+    }
+}
+
 impl Display for UnOpcode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         use UnOpcode::*;
@@ -299,7 +375,7 @@ impl Display for UnOpcode {
 //     Binop(Box<BoolExpr>),
 // }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum Type {
     Int,
     Bool,
@@ -318,7 +394,21 @@ impl Display for Type {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct Var(pub String);
+pub struct Var(pub String, pub Type);
+
+impl Var {
+    pub fn is_bool(&self) -> bool {
+        self.1 == Type::Bool
+    }
+
+    pub fn is_int(&self) -> bool {
+        self.1 == Type::Int
+    }
+
+    pub fn set_type(&mut self, t: Type) {
+        self.1 = t;
+    }
+}
 
 impl Deref for Var {
     type Target = String;
@@ -341,17 +431,16 @@ pub struct Loc {
 }
 
 pub fn loc_from_offset(src: &str, offset: usize) -> Loc {
-    let (line, col) = src[0..offset].chars().fold((1, 1), |(line, col), curr_char| {
-        if curr_char == '\n' {
-            (line + 1, 1)
-        } else {
-            (line, col + 1)
-        }
-    });
-    Loc {
-        line,
-        col,
-    }
+    let (line, col) = src[0..offset]
+        .chars()
+        .fold((1, 1), |(line, col), curr_char| {
+            if curr_char == '\n' {
+                (line + 1, 1)
+            } else {
+                (line, col + 1)
+            }
+        });
+    Loc { line, col }
 }
 
 pub fn sep_string_display<T: Display>(elems: &Vec<T>, sep: &str) -> String {
@@ -365,4 +454,3 @@ pub fn sep_string_display<T: Display>(elems: &Vec<T>, sep: &str) -> String {
 
     res
 }
-

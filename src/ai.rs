@@ -1,21 +1,26 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use elina::ast::{Abstract, Environment, Hcons, Manager, OptPkManager, Tcons, Texpr, TexprBinop, TexprUnop};
-use petgraph::Direction::{Incoming, Outgoing};
-use petgraph::dot::{Config, Dot};
-use petgraph::graph::{EdgeIndex, EdgeReference, node_index, NodeIndex};
-use petgraph::prelude::Dfs;
-use petgraph::visit::{EdgeRef, IntoEdges, Visitable};
-use crate::ast::{Expr, UnOpcode, WithLoc};
-use crate::ast::BinOpcode;
-use crate::ir::{IntraProcCFG, IREdge, IRNode};
 
-// TODO: free_vars should work with a HashSet
+use elina::ast::{
+    Abstract, Environment, Hcons, Manager, OptPkManager, Texpr, TexprBinop, TexprUnop,
+};
+use petgraph::dot::{Config, Dot};
+use petgraph::graph::{EdgeIndex, EdgeReference, NodeIndex};
+use petgraph::prelude::Dfs;
+use petgraph::visit::EdgeRef;
+use petgraph::Direction::{Incoming, Outgoing};
+
+use crate::ast::BinOpcode;
+use crate::ast::{Expr, UnOpcode, WithLoc};
+use crate::ir::{IREdge, IRNode, IntraProcCFG};
+
+// TODO: to counteract bool_vars causing imprecisions, add (optional) preprocessing step
+// that tries to inline all uses of bool vars. needs other static analyses first
 
 pub fn graphviz_with_states<M: Manager>(
     cfg: &IntraProcCFG,
     man: &M,
     env: &Environment,
-    state_map: &HashMap<EdgeIndex, Abstract>
+    state_map: &HashMap<EdgeIndex, Abstract>,
 ) -> String {
     let edge_getter = |_, edge: EdgeReference<IREdge>| {
         let mut intervals = "".to_owned();
@@ -23,9 +28,12 @@ pub fn graphviz_with_states<M: Manager>(
         if !state_map[&edge.id()].is_bottom(man) {
             let mut vars = env.keys().map(|v| v.as_str()).collect::<Vec<_>>();
             vars.sort();
-            // let vars = &["x", "res"];
             for v in vars {
-                intervals += &format!("{}: {:?}\\n", v, state_map[&edge.id()].get_bounds(man, env, v));
+                intervals += &format!(
+                    "{}: {:?}\\n",
+                    v,
+                    state_map[&edge.id()].get_bounds(man, env, v)
+                );
             }
         }
 
@@ -37,25 +45,27 @@ pub fn graphviz_with_states<M: Manager>(
             IREdge::NotTaken => "red",
         };
 
-        format!("label = \"{}\\n{}\\n{}\" color = {}", *edge.weight(), abs_string, intervals, color)
+        format!(
+            "label = \"{}\\n{}\\n{}\" color = {}",
+            *edge.weight(),
+            abs_string,
+            intervals,
+            color
+        )
     };
-    let node_getter = |_, _| {
-        format!("")
-    };
+    let node_getter = |_, _| format!("");
 
     let dot = Dot::with_attr_getters(
         &cfg.graph,
         &[Config::EdgeNoLabel],
         &edge_getter,
-        &node_getter
+        &node_getter,
     );
     format!("{}", dot)
 }
 
 static WIDENING_THRESHOLD: usize = 100;
 pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
-
-
     let graph = &cfg.graph;
     let entry = cfg.entry;
 
@@ -69,7 +79,11 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
         free_vars.extend(irn.free_vars());
     }
 
-    let mut free_vars = free_vars.into_iter().map(|v| v.0).collect::<Vec<_>>();
+    let mut free_vars = free_vars
+        .into_iter()
+        .filter(|v| v.is_int())
+        .map(|v| v.0)
+        .collect::<Vec<_>>();
     free_vars.sort();
     println!("{:?}", free_vars);
     let env = Environment::new(free_vars);
@@ -108,7 +122,6 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
             .map(|e| &edge_state_map[&e.id()])
             .collect::<Vec<_>>();
 
-
         let prev_state = &state_before_node[&curr_node];
 
         let mut curr_state = if curr_node == entry {
@@ -130,17 +143,19 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
         // prev_state != curr_state
         *node_encounters.get_mut(&curr_node).unwrap() += 1;
         if node_encounters[&curr_node] > WIDENING_THRESHOLD {
-            println!("\n--------\nWIDENING: prev{} and curr{}", prev_state.to_string(&man, &env), curr_state.to_string(&man, &env));
+            println!(
+                "\n--------\nWIDENING: prev{} and curr{}",
+                prev_state.to_string(&man, &env),
+                curr_state.to_string(&man, &env)
+            );
             curr_state = prev_state.widen_copy(&man, &curr_state);
             println!("WIDENED INTO: {}", curr_state.to_string(&man, &env));
         }
         state_before_node.insert(curr_node, curr_state.clone());
 
-
         // Need to compute outgoing state
         let curr_irnode = graph[curr_node].clone();
         let taken_state = handle_irnode(&man, &env, &curr_irnode, &mut curr_state);
-
 
         let outgoing_edges = graph
             .edges_directed(curr_node, Outgoing)
@@ -150,16 +165,17 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
         for out_edge in outgoing_edges {
             let edge_kind = *out_edge.weight();
             let out_state = match edge_kind {
-                IREdge::Fallthrough | IREdge::NotTaken => {
-                    curr_state.clone()
-                }
+                IREdge::Fallthrough | IREdge::NotTaken => curr_state.clone(),
                 IREdge::Taken => {
                     // curr_node must be CBranch and we must have gotten a Some(taken) result state
                     taken_state.clone().unwrap()
                 }
             };
 
-            println!("\n-----\nHandling Edge\nold out edge state: {}", edge_state_map[&out_edge.id()].to_string(&man, &env));
+            println!(
+                "\n-----\nHandling Edge\nold out edge state: {}",
+                edge_state_map[&out_edge.id()].to_string(&man, &env)
+            );
             println!("new out_state: {}", out_state.to_string(&man, &env));
 
             if edge_state_map[&out_edge.id()] == out_state {
@@ -170,8 +186,6 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
             // if old_state != taken_state then add to worklist
             worklist.push_back(out_edge.target());
         }
-
-
     }
 
     println!("{}", graphviz_with_states(cfg, &man, &env, &edge_state_map));
@@ -179,32 +193,49 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
     edge_state_map
 }
 
-fn handle_irnode<M: Manager>(man: &M, env: &Environment, ir: &IRNode, state: &mut Abstract) -> Option<Abstract> {
+fn handle_irnode<M: Manager>(
+    man: &M,
+    env: &Environment,
+    ir: &IRNode,
+    state: &mut Abstract,
+) -> Option<Abstract> {
     use IRNode::*;
 
     // TODO: in Decl/Assn cases check that we are assigning int variable, otherwise skip
     match ir {
         // "true" constraint
-        IRTestcase | IRUnreachable | IRSkip | IRBranch =>
-            None,
+        IRTestcase | IRUnreachable | IRSkip | IRBranch => None,
         IRDecl(v, e) => {
+            if v.is_bool() {
+                // Not handling boolean variables
+                return None;
+            }
+
             let texpr = int_expr_to_texpr(env, e);
             state.assign(man, env, v.as_str(), &texpr);
             None
         }
         IRAssn(v, e) => {
+            if v.is_bool() {
+                // Not handling boolean variables
+                return None;
+            }
+
             let texpr = int_expr_to_texpr(env, e);
             state.assign(man, env, v.as_str(), &texpr);
             None
         }
-        IRReturn(e) => {
+        IRReturn(_e) => {
             // TODO: Handle return better. How?
 
             None
         }
         IRCBranch(cond) => {
-            // TODO: branch here based on "is cond deterministic/does cond only contain int variables"
-            // otherwise, meet with TOP for both branches, i.e. no-op
+            // We don't analyze boolean variables currently, so we overapproximate
+            if cond.contains_bool_var() {
+                let taken = state.clone();
+                return Some(taken);
+            }
 
             let hcons = bool_expr_to_hcons(env, cond);
             let mut taken = state.clone();
@@ -224,6 +255,8 @@ fn bool_expr_to_hcons(env: &Environment, expr: &Expr) -> Hcons {
         BoolLit(true) => Texpr::int(0).lt(Texpr::int(1)).into(),
         BoolLit(false) => Texpr::int(0).lt(Texpr::int(0)).into(),
         Var(_) => panic!("bool variables are unsupported at the moment"),
+        // TODO: make call just go to top by default, and maybe a second run where it utilizes
+        // a previous run's AI results.
         Call(_, _) => panic!("calls are unsupported at the moment"),
         BinOp(WithLoc { elem: op, .. }, left, right) => {
             // op must be int * int -> bool
@@ -272,20 +305,17 @@ fn bool_expr_to_hcons(env: &Environment, expr: &Expr) -> Hcons {
                 _ => panic!("arithmetic operator in a bool expr"),
             }
         }
-        UnOp(WithLoc { elem: op, .. }, inner) => {
-            match op {
-                UnOpcode::Not => {
-                    let hcons_inner = bool_expr_to_hcons(env, inner);
-                    hcons_inner.not()
-                }
-                _ => panic!("arithmetic unop in a bool expr"),
+        UnOp(WithLoc { elem: op, .. }, inner) => match op {
+            UnOpcode::Not => {
+                let hcons_inner = bool_expr_to_hcons(env, inner);
+                hcons_inner.not()
             }
-        }
+            _ => panic!("arithmetic unop in a bool expr"),
+        },
     }
 }
 
 fn int_expr_to_texpr(env: &Environment, expr: &Expr) -> Texpr {
-    use BinOpcode::*;
     use Expr::*;
 
     match expr {
