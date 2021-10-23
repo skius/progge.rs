@@ -23,6 +23,7 @@ pub struct ScopedTypeContext {
     parent: Weak<ScopedTypeContext>,
     children: RefCell<Vec<Rc<ScopedTypeContext>>>,
     var_type: RefCell<HashMap<String, Type>>,
+    var_name: RefCell<HashMap<String, String>>,
 }
 
 // type RRSTCtx = Rc<RefCell<ScopedTypeContext>>;
@@ -33,6 +34,7 @@ impl ScopedTypeContext {
             parent: Weak::new(),
             children: RefCell::new(vec![]),
             var_type: RefCell::new(HashMap::new()),
+            var_name: RefCell::new(HashMap::new()),
         })
     }
 
@@ -40,8 +42,18 @@ impl ScopedTypeContext {
     //     &self.parent
     // }
 
-    pub fn insert(self: &Rc<ScopedTypeContext>, s: String, t: Type) {
-        self.var_type.borrow_mut().insert(s, t);
+    // TODO: maybe make `count` handled by ScopedTypeContext?
+    pub fn insert(self: &Rc<ScopedTypeContext>, s: String, t: Type, count: usize) {
+        self.var_type.borrow_mut().insert(s.clone(), t);
+        // let depth = self.depth_of_var(s.as_str()).unwrap();
+        let name = if count != 1 {
+            format!("{}_{}", s, count)
+        } else {
+            format!("{}", s)
+        };
+
+        self.var_name.borrow_mut().insert(s.clone(), name);
+
     }
 
     // pub fn new_scope(self: Rc<ScopedTypeContext>) -> Rc<ScopedTypeContext> {
@@ -63,6 +75,7 @@ impl ScopedTypeContext {
             parent: Rc::downgrade(self),
             children: RefCell::new(vec![]),
             var_type: RefCell::new(HashMap::new()),
+            var_name: RefCell::new(HashMap::new()),
         });
         self.children.borrow_mut().push(new_ctx.clone());
         *self = new_ctx;
@@ -80,6 +93,20 @@ impl ScopedTypeContext {
             let entry = ctx.var_type.borrow().get(s).map(|t| *t);
             if let Some(t) = entry {
                 return Some((t, ctx));
+            }
+            curr = ctx.parent.borrow().upgrade();
+        }
+
+        None
+    }
+
+    pub fn lookup_name(self: &Rc<ScopedTypeContext>, s: &str) -> Option<String> {
+        let mut curr = Some(self.clone());
+
+        while let Some(ctx) = curr {
+            let entry = ctx.var_name.borrow().get(s).map(|t| t.clone());
+            if let Some(t) = entry {
+                return Some(t);
             }
             curr = ctx.parent.borrow().upgrade();
         }
@@ -227,6 +254,7 @@ pub struct TypeChecker {
     src_file: String,
     curr_s_ty_ctx: Rc<ScopedTypeContext>,
     root_s_ty_ctx: Rc<ScopedTypeContext>,
+    var_counts: HashMap<String, usize>,
 }
 
 impl TypeChecker {
@@ -237,6 +265,7 @@ impl TypeChecker {
             src_file: s.as_ref().to_string(),
             curr_s_ty_ctx: s_ty_ctx.clone(),
             root_s_ty_ctx: s_ty_ctx,
+            var_counts: HashMap::new(),
         }
     }
 
@@ -278,6 +307,15 @@ impl TypeChecker {
         self.curr_s_ty_ctx.close_scope();
     }
 
+    fn increase_and_get_count(&mut self, v: &str) -> usize {
+        *self.var_counts.entry(v.to_string()).or_insert(0) += 1;
+        self.var_counts[v]
+    }
+
+    fn get_count(&self, v: &str) -> usize {
+        self.var_counts[v]
+    }
+
     // TODO: issue with this when two variables are in disjoint scopes. e.g.
     /*
     ```
@@ -291,12 +329,16 @@ impl TypeChecker {
     ```
     Maybe solve this with a count of variables in the TypeChecker, and on scope-opening
     increase the count for that variable?
+
+    no actually need to store the renamed stuff in ScopedTypeContext
      */
     fn disambig_var(&mut self, v: &mut Var) {
-        let depth = self.curr_s_ty_ctx.depth_of_var(v.as_str()).unwrap();
-        if depth != 1 {
-            v.0.push_str(&format!("_{}", depth));
-        }
+        // let depth = self.curr_s_ty_ctx.depth_of_var(v.as_str()).unwrap();
+        // let count = *self.var_counts.get(v.as_str()).unwrap();
+        // if count != 1 {
+        //     v.0.push_str(&format!("_{}", count));
+        // }
+        v.0 = self.curr_s_ty_ctx.lookup_name(v.as_str()).unwrap();
     }
 
     pub fn tc_fdef(&mut self, fdef: &mut WithLoc<FuncDef>) -> Result<()> {
@@ -304,11 +346,13 @@ impl TypeChecker {
 
         let mut seen_params: HashMap<String, WithLoc<Var>> = HashMap::new();
 
+        self.var_counts = HashMap::new();
+
         // self.open_scope();
 
         fdef.params.iter_mut().for_each(|param| {
-            self.curr_s_ty_ctx.insert(param.0.to_string(), *param.1);
-
+            let count = self.increase_and_get_count(param.0.as_str());
+            self.curr_s_ty_ctx.insert(param.0.to_string(), *param.1, count);
             self.disambig_var(&mut param.0);
             param.0.set_type(*param.1);
 
@@ -452,8 +496,9 @@ impl TypeChecker {
                 // let binding opens a new scope
                 self.open_scope();
 
+                let count = self.increase_and_get_count(v.as_str());
                 let t_exp = t_exp_res.unwrap();
-                self.curr_s_ty_ctx.insert(v.to_string(), t_exp);
+                self.curr_s_ty_ctx.insert(v.to_string(), t_exp, count);
                 // println!("inserted: {}", t_exp);
                 self.disambig_var(&mut *v);
                 v.set_type(t_exp);

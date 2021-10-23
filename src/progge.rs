@@ -47,7 +47,7 @@ fn main() -> Result<(), TcError> {
         println!("Successfully type-checked \"{}\".", src_file)
     }
 
-    // println!("{}", prog);
+    println!("{}", prog);
     //
     // let main = IntraProcCFG::from(&*prog[0]);
     // println!("{}", main.graphviz());
