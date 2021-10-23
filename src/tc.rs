@@ -278,6 +278,20 @@ impl TypeChecker {
         self.curr_s_ty_ctx.close_scope();
     }
 
+    // TODO: issue with this when two variables are in disjoint scopes. e.g.
+    /*
+    ```
+    if true {
+        let not_the_same = 5;
+    }
+
+    if true {
+        let not_the_same = true;
+    }
+    ```
+    Maybe solve this with a count of variables in the TypeChecker, and on scope-opening
+    increase the count for that variable?
+     */
     fn disambig_var(&mut self, v: &mut Var) {
         let depth = self.curr_s_ty_ctx.depth_of_var(v.as_str()).unwrap();
         if depth != 1 {

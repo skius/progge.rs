@@ -6,6 +6,15 @@ fn analyze(x: int, y: int) -> int {
     // }
     // let outer = inner;
     /* test */
+    if true {
+        let not_the_same = 5;
+    }
+
+    if true {
+        let not_the_same = true;
+    }
+
+
     let inner = 5;
     let inner = inner == 5;
     if x < y && inner {
@@ -17,7 +26,7 @@ fn analyze(x: int, y: int) -> int {
         let inner = 4;
         return z;
     }
-    let call = ex(5 - 5 == 5, 2);
+    // let call = ex(5 - 5 == 5, 2);
     inner = 59 < 0;
     return 10;
 }
