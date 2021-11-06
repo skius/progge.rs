@@ -1,0 +1,15 @@
+fn analyze() -> int {
+    let x_2 = 10;
+    let x = 0;
+    let x = x + 1;
+    x_2 = 5;
+    if true {
+        let x = 2;
+        x = 3;
+    } else {
+        let x = 4;
+    }
+
+    // returns 1
+    return x;
+}
