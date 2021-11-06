@@ -16,60 +16,112 @@ use crate::ir::{IREdge, IRNode, IntraProcCFG};
 // TODO: to counteract bool_vars causing imprecisions, add (optional) preprocessing step
 // that tries to inline all uses of bool vars. needs other static analyses first
 
-pub fn graphviz_with_states<M: Manager>(
-    cfg: &IntraProcCFG,
-    man: &M,
-    env: &Environment,
-    state_map: &HashMap<EdgeIndex, Abstract>,
-) -> String {
-    let edge_getter = |_, edge: EdgeReference<IREdge>| {
-        let mut intervals = "".to_owned();
 
-        if !state_map[&edge.id()].is_bottom(man) {
-            let mut vars = env.keys().map(|v| v.as_str()).collect::<Vec<_>>();
-            vars.sort();
-            for v in vars {
-                intervals += &format!(
-                    "{}: {:?}\\n",
-                    v,
-                    state_map[&edge.id()].get_bounds(man, env, v)
-                );
-            }
-        }
-
-        let abs_string = state_map[&edge.id()].to_string(man, env);
-
-        let color = match edge.weight() {
-            IREdge::Fallthrough => "black",
-            IREdge::Taken => "green",
-            IREdge::NotTaken => "red",
-        };
-
-        format!(
-            "label = \"{}\\n{}\\n{}\" color = {}",
-            *edge.weight(),
-            abs_string,
-            intervals,
-            color
-        )
-    };
-    let node_getter = |_, _| format!("");
-
-    let dot = Dot::with_attr_getters(
-        &cfg.graph,
-        &[Config::EdgeNoLabel],
-        &edge_getter,
-        &node_getter,
-    );
-    format!("{}", dot)
+// TODO: disconnect from the cfg's internal graph representation
+/// This holds necessary information and results of abstract interpretation.
+pub struct AbstractInterpretationEnvironment<'a, M: Manager> {
+    pub man: M,
+    pub env: Environment,
+    pub state_map: HashMap<EdgeIndex, Abstract>,
+    pub cfg: &'a IntraProcCFG,
 }
 
-static WIDENING_THRESHOLD: usize = 100;
-pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
+impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
+    pub fn graphviz(&self) -> String {
+        let edge_getter = |_, edge: EdgeReference<IREdge>| {
+            let mut intervals = "".to_owned();
+    
+            if !self.state_map[&edge.id()].is_bottom(&self.man) {
+                let mut vars = self.env.keys().map(|v| v.as_str()).collect::<Vec<_>>();
+                vars.sort();
+                for v in vars {
+                    intervals += &format!(
+                        "{}: {:?}\\n",
+                        v,
+                        self.state_map[&edge.id()].get_bounds(&self.man, &self.env, v)
+                    );
+                }
+            }
+    
+            let abs_string = self.state_map[&edge.id()].to_string(&self.man, &self.env);
+    
+            let color = match edge.weight() {
+                IREdge::Fallthrough => "black",
+                IREdge::Taken => "green",
+                IREdge::NotTaken => "red",
+            };
+    
+            format!(
+                "label = \"{}\\n{}\\n{}\" color = {}",
+                *edge.weight(),
+                abs_string,
+                intervals,
+                color
+            )
+        };
+        let node_getter = |_, _| format!("");
+    
+        let dot = Dot::with_attr_getters(
+            &self.cfg.graph,
+            &[Config::EdgeNoLabel],
+            &edge_getter,
+            &node_getter,
+        );
+        format!("{}", dot)
+    }
+}
+
+// pub fn graphviz_with_states<M: Manager>(
+//     cfg: &IntraProcCFG,
+//     man: &M,
+//     env: &Environment,
+//     state_map: &HashMap<EdgeIndex, Abstract>,
+// ) -> String {
+//     let edge_getter = |_, edge: EdgeReference<IREdge>| {
+//         let mut intervals = "".to_owned();
+
+//         if !state_map[&edge.id()].is_bottom(man) {
+//             let mut vars = env.keys().map(|v| v.as_str()).collect::<Vec<_>>();
+//             vars.sort();
+//             for v in vars {
+//                 intervals += &format!(
+//                     "{}: {:?}\\n",
+//                     v,
+//                     state_map[&edge.id()].get_bounds(man, env, v)
+//                 );
+//             }
+//         }
+
+//         let abs_string = state_map[&edge.id()].to_string(man, env);
+
+//         let color = match edge.weight() {
+//             IREdge::Fallthrough => "black",
+//             IREdge::Taken => "green",
+//             IREdge::NotTaken => "red",
+//         };
+
+//         format!(
+//             "label = \"{}\\n{}\\n{}\" color = {}",
+//             *edge.weight(),
+//             abs_string,
+//             intervals,
+//             color
+//         )
+//     };
+//     let node_getter = |_, _| format!("");
+
+//     let dot = Dot::with_attr_getters(
+//         &cfg.graph,
+//         &[Config::EdgeNoLabel],
+//         &edge_getter,
+//         &node_getter,
+//     );
+//     format!("{}", dot)
+// }
+
+fn env_from_cfg(cfg: &IntraProcCFG) -> Environment {
     let graph = &cfg.graph;
     let entry = cfg.entry;
-
-    let man = OptPkManager::default();
 
     let mut free_vars = HashSet::new();
 
@@ -85,18 +137,29 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
         .map(|v| v.0)
         .collect::<Vec<_>>();
     free_vars.sort();
-    println!("{:?}", free_vars);
-    let env = Environment::new(free_vars);
+    // println!("{:?}", free_vars);
+    Environment::new(free_vars)
+}
+
+static WIDENING_THRESHOLD: usize = 100;
+/// This function returns a map from each edge to the abstract state at that edge.
+pub fn run(cfg: &IntraProcCFG) -> AbstractInterpretationEnvironment<impl Manager> {
+    let graph = &cfg.graph;
+    let entry = cfg.entry;
+
+    let man = OptPkManager::default();
+
+    let env = env_from_cfg(cfg);
 
     let mut edge_state_map = HashMap::new();
-    let mut state_before_node: HashMap<NodeIndex, Abstract> = HashMap::new();
+    let mut prev_state_of_nodes: HashMap<NodeIndex, Abstract> = HashMap::new();
     let mut node_encounters: HashMap<NodeIndex, usize> = HashMap::new();
 
     for edge in graph.edge_indices() {
         edge_state_map.insert(edge, Abstract::bottom(&man, &env));
     }
     for node in graph.node_indices() {
-        state_before_node.insert(node, Abstract::bottom(&man, &env));
+        prev_state_of_nodes.insert(node, Abstract::bottom(&man, &env));
         node_encounters.insert(node, 0);
     }
 
@@ -109,7 +172,7 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
     //     edge_state_map.insert(*entry_out, Abstract::top(&man, &env));
     // }
 
-    state_before_node.insert(entry, Abstract::top(&man, &env));
+    prev_state_of_nodes.insert(entry, Abstract::top(&man, &env));
 
     let mut worklist = VecDeque::new();
     worklist.push_back(entry);
@@ -122,7 +185,7 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
             .map(|e| &edge_state_map[&e.id()])
             .collect::<Vec<_>>();
 
-        let prev_state = &state_before_node[&curr_node];
+        let prev_state = &prev_state_of_nodes[&curr_node];
 
         let mut curr_state = if curr_node == entry {
             Abstract::top(&man, &env)
@@ -143,15 +206,15 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
         // prev_state != curr_state
         *node_encounters.get_mut(&curr_node).unwrap() += 1;
         if node_encounters[&curr_node] > WIDENING_THRESHOLD {
-            println!(
-                "\n--------\nWIDENING: prev{} and curr{}",
-                prev_state.to_string(&man, &env),
-                curr_state.to_string(&man, &env)
-            );
+            // println!(
+            //     "\n--------\nWIDENING: prev{} and curr{}",
+            //     prev_state.to_string(&man, &env),
+            //     curr_state.to_string(&man, &env)
+            // );
             curr_state = prev_state.widen_copy(&man, &curr_state);
-            println!("WIDENED INTO: {}", curr_state.to_string(&man, &env));
+            // println!("WIDENED INTO: {}", curr_state.to_string(&man, &env));
         }
-        state_before_node.insert(curr_node, curr_state.clone());
+        prev_state_of_nodes.insert(curr_node, curr_state.clone());
 
         // Need to compute outgoing state
         let curr_irnode = graph[curr_node].clone();
@@ -172,11 +235,11 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
                 }
             };
 
-            println!(
-                "\n-----\nHandling Edge\nold out edge state: {}",
-                edge_state_map[&out_edge.id()].to_string(&man, &env)
-            );
-            println!("new out_state: {}", out_state.to_string(&man, &env));
+            // println!(
+            //     "\n-----\nHandling Edge\nold out edge state: {}",
+            //     edge_state_map[&out_edge.id()].to_string(&man, &env)
+            // );
+            // println!("new out_state: {}", out_state.to_string(&man, &env));
 
             if edge_state_map[&out_edge.id()] == out_state {
                 // we are not causing a change in succ
@@ -188,9 +251,14 @@ pub fn run(cfg: &IntraProcCFG) -> HashMap<EdgeIndex, Abstract> {
         }
     }
 
-    println!("{}", graphviz_with_states(cfg, &man, &env, &edge_state_map));
+    //println!("{}", graphviz_with_states(cfg, &man, &env, &edge_state_map));
 
-    edge_state_map
+    AbstractInterpretationEnvironment {
+        man,
+        env,
+        state_map: edge_state_map,
+        cfg,
+    }
 }
 
 fn handle_irnode<M: Manager>(

@@ -43,6 +43,17 @@ impl<T: Clone + Debug + Display> Display for WithLoc<T> {
 #[derive(Debug, Clone)]
 pub struct Program(pub Vec<WithLoc<FuncDef>>);
 
+impl Program {
+    pub fn find_funcdef(&self, name: &str) -> Option<&WithLoc<FuncDef>> {
+        for funcdef in &self.0 {
+            if funcdef.name.elem == name {
+                return Some(funcdef);
+            }
+        }
+        None
+    }
+}
+
 impl Deref for Program {
     type Target = Vec<WithLoc<FuncDef>>;
 

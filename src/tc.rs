@@ -272,9 +272,9 @@ impl TypeChecker {
     pub fn tc_prog(&mut self, prog: &mut WithLoc<Program>) -> Result<()> {
         let mut errs = vec![];
 
-        if !self.f_ty_ctx.contains_key("main") {
-            errs.push(TcErrorInner::new("function `main` not found", prog.loc));
-        }
+        // if !self.f_ty_ctx.contains_key("main") {
+        //     errs.push(TcErrorInner::new("function `main` not found", prog.loc));
+        // }
 
         let err_fdefs = prog
             .iter_mut()
