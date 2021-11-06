@@ -46,11 +46,20 @@ impl ScopedTypeContext {
         let count = *self.var_counts.deref().borrow().get(s.as_str()).unwrap();
         self.var_type.borrow_mut().insert(s.clone(), t);
         // let depth = self.depth_of_var(s.as_str()).unwrap();
-        let name = if count != 1 {
-            format!("{}_{}", s, count)
-        } else {
-            format!("{}", s)
-        };
+        // let name = if count != 1 {
+        //     format!("{}_{}", s, count)
+        // } else {
+        //     format!("{}", s)
+        // };
+
+        // Necessary for the following program:
+        //  let inner_2 = 0;
+        //  let inner = 1;
+        //  let inner = 1;
+        //  inner_2 = 5;
+        //  return inner;
+        // This should return 1, not 5, but inner_2 would implicitely refer to the last inner, because it wouldn't be translated to inner_2_1.
+        let name = format!("{}_{}", s, count);
 
         self.var_name.borrow_mut().insert(s.clone(), name);
 
