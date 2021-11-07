@@ -36,7 +36,7 @@ fn main() -> Result<(), TcError> {
     }
     if config.do_tc {
         // typechcek the program
-        let mut tc = TypeChecker::new(FuncTypeContext::from(&*prog), src_file);
+        let mut tc = TypeChecker::new(FuncTypeContext::from(&*prog), src_file, src.clone());
         let res = tc.tc_prog(&mut prog);
         if let Err(err) = res {
             eprintln!("Error while type-checking {}:", src_file);
@@ -120,3 +120,4 @@ fn parse_args() -> Config {
 
     cfg
 }
+

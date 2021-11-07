@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::rc::{Rc, Weak};
+use ariadne::{Color, ColorGenerator, Fmt, Label, Report, Source};
 use petgraph::graph::DiGraph;
 
 use crate::ast::*;
@@ -252,16 +253,18 @@ type Result<T> = core::result::Result<T, TcError>;
 pub struct TypeChecker {
     f_ty_ctx: FuncTypeContext,
     src_file: String,
+    src_content: String,
     curr_s_ty_ctx: Rc<ScopedTypeContext>,
     root_s_ty_ctx: Rc<ScopedTypeContext>,
 }
 
 impl TypeChecker {
-    pub fn new<S: AsRef<str>>(f_ty_ctx: FuncTypeContext, s: S) -> TypeChecker {
+    pub fn new<S: AsRef<str>>(f_ty_ctx: FuncTypeContext, src_file: S, src: String) -> TypeChecker {
         let s_ty_ctx = ScopedTypeContext::new();
         TypeChecker {
             f_ty_ctx,
-            src_file: s.as_ref().to_string(),
+            src_file: src_file.as_ref().to_string(),
+            src_content: src,
             curr_s_ty_ctx: s_ty_ctx.clone(),
             root_s_ty_ctx: s_ty_ctx,
         }
@@ -557,10 +560,29 @@ impl TypeChecker {
             Expr::Var(v) => {
                 let t = self.curr_s_ty_ctx.lookup(v.as_str());
                 match t {
-                    None => Err(TcError::new(
-                        format!("variable `{}` used before declared", v),
-                        v.loc,
-                    )),
+                    None => {
+                        // TODO: Pass "print errors" flag that prints errors with ariadne live, otherwise just accumulate them and return
+                        // TODO: extract v.loc.start..v.loc.end into v.loc.span()
+                        Report::build(ariadne::ReportKind::Error, &self.src_file, v.loc.start)
+                            .with_message::<&str>("variable used before declared")
+                            .with_label(
+                                Label::new(
+                                    (&self.src_file, v.loc.start..v.loc.end)
+                                )
+                                .with_message(
+                                    format!("variable {} used before declared", v.elem.as_str().fg(Color::Red))
+                                )
+                                .with_color(Color::Red)
+                            )
+                            .finish()
+                            .print((&self.src_file, Source::from(self.src_content.clone())))
+                            .unwrap();
+
+                        Err(TcError::new(
+                            format!("variable `{}` used before declared", v),
+                            v.loc,
+                        ))
+                    },
                     Some(t) => {
                         self.disambig_var(&mut *v);
                         v.set_type(t);
@@ -583,12 +605,42 @@ impl TypeChecker {
                     ))
                 }
 
-                let param_tys = param_tys.iter().map(|p| *p.1).collect::<Vec<_>>();
+                let param_tys = param_tys.iter().map(|p| p.1.clone()).collect::<Vec<_>>();
 
                 let err = param_tys.into_iter().zip(args.iter_mut()).map(|(param_t, arg)| {
                     let arg_t = self.tc_exp(arg)?;
 
-                    if arg_t != param_t {
+                    if arg_t != *param_t {
+                        let mut colors = ColorGenerator::new();
+
+                        let a = colors.next();
+                        let b = colors.next();
+
+                        Report::build(ariadne::ReportKind::Error, &self.src_file, arg.loc.start)
+                        .with_message::<&str>("argument type mismatch")
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, arg.loc.start..arg.loc.end)
+                            )
+                            .with_message(
+                                format!("this expression has type {}", arg_t.to_string().fg(a))
+                            )
+                            .with_color(a)
+                        )
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, param_t.loc.start..param_t.loc.end)
+                            )
+                            .with_message(
+                                format!("this parameter has type {}", param_t.elem.to_string().fg(b))
+                            )
+                            .with_color(b)
+                        )
+                        .with_note(format!("the types of {} and respective {} must match in a call expression", "arguments".fg(a), "parameters".fg(b)))
+                        .finish()
+                        .print((&self.src_file, Source::from(self.src_content.clone())))
+                        .unwrap();
+
                         return Err(TcError::new(
                             format!("argument type mismatch for call to `{}`: expected type `{}` got type `{}`", name, param_t, arg_t),
                             arg.loc,

@@ -439,10 +439,12 @@ impl Display for Var {
 pub struct Loc {
     pub line: usize,
     pub col: usize,
+    pub start: usize,
+    pub end: usize,
 }
 
-pub fn loc_from_offset(src: &str, offset: usize) -> Loc {
-    let (line, col) = src[0..offset]
+pub fn loc_from_offset(src: &str, start: usize, end: usize) -> Loc {
+    let (line, col) = src[0..start]
         .chars()
         .fold((1, 1), |(line, col), curr_char| {
             if curr_char == '\n' {
@@ -451,7 +453,7 @@ pub fn loc_from_offset(src: &str, offset: usize) -> Loc {
                 (line, col + 1)
             }
         });
-    Loc { line, col }
+    Loc { line, col, start, end }
 }
 
 pub fn sep_string_display<T: Display>(elems: &Vec<T>, sep: &str) -> String {
