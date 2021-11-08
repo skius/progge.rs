@@ -293,11 +293,9 @@ impl TypeChecker {
         //     errs.push(TcErrorInner::new("function `main` not found", prog.loc));
         // }
 
-        let err_fdefs = prog
-            .iter_mut()
+        prog.iter_mut()
             .for_each(|fdef| self.tc_fdef(fdef));
-        // TODO: See if there's a smarter way?
-        
+
         if !self.errors.is_empty() {
             return Err(self.errors.clone());
         }
@@ -316,11 +314,10 @@ impl TypeChecker {
     fn disambig_var(&mut self, v: &mut Var) {
         if let Some(s) = self.curr_s_ty_ctx.lookup_name(v.as_str()) {
             v.0 = s;
-        }
+        } // If we can't find the variable in the type context, it means it's not defined and was propagated through errors.
     }
 
     pub fn tc_fdef(&mut self, fdef: &mut WithLoc<FuncDef>) {
-        let mut errs = vec![];
         // reset var counts, completely different scope.
         self.curr_s_ty_ctx.clear_var_count();
         let mut seen_params: HashMap<String, WithLoc<Var>> = HashMap::new();
@@ -332,11 +329,12 @@ impl TypeChecker {
             self.disambig_var(&mut param.0);
             param.0.set_type(*param.1);
 
+
             if let Some(entry) = seen_params.get(param.0.as_str()) {
-                errs.push(TcErrorInner::new(
+                self.errors.add(
                     format!("duplicate formal parameter `{}`", entry.elem),
                     param.0.loc,
-                ))
+                );
             } else {
                 seen_params.insert(param.0.to_string(), param.0.clone());
             }
@@ -645,6 +643,15 @@ impl TypeChecker {
             }
         }
     }
+}
+
+// Helper to generate a bunch of colors
+fn colors<const N: usize>() -> [Color; N] {
+    let mut color_gen = ColorGenerator::new();
+
+    let colors = (0..N).map(|_| color_gen.next()).collect::<Vec<_>>();
+    let res = [0usize; N];
+    res.map(|i| colors[i])
 }
 
 // THESE ARE USED FOR THE PARSER AT THE MOMENT:

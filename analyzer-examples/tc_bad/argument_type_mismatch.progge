@@ -11,3 +11,5 @@ fn baz() -> int {
 fn bar(b: bool) -> int {
     return 0;
 }
+
+//

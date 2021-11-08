@@ -22,7 +22,7 @@ fn main() -> Result<(), TcError> {
 
     let src_file = &config.src_file;
 
-    let src = read_to_string(src_file).unwrap();
+    let src = read_to_string(src_file).expect(&format!("couldn't read file {}", src_file)).replace("\r\n", "\n");
     let mut tctx = VariableTypeContext::new();
     let mut prog: WithLoc<Program> = progge::ProgramLParser::new()
         .parse(src_file, &src, &mut tctx, &src)
