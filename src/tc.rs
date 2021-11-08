@@ -293,8 +293,50 @@ impl TypeChecker {
         //     errs.push(TcErrorInner::new("function `main` not found", prog.loc));
         // }
 
+        let mut seen_funcs: HashMap<String, WithLoc<String>> = HashMap::new();
+
         prog.iter_mut()
-            .for_each(|fdef| self.tc_fdef(fdef));
+            .for_each(|fdef| {
+                if let Some(entry) = seen_funcs.get(fdef.name.as_str()) {
+                    let [color1, color2] = colors();
+
+                    Report::build(ariadne::ReportKind::Error, &self.src_file, fdef.name.loc.start)
+                        .with_message::<&str>("duplicate function name")
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, fdef.name.loc.range())
+                            )
+                                .with_message(
+                                    format!("function {} redefined here", fdef.name.as_str().fg(color1))
+                                )
+                                .with_color(color1)
+                        )
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, entry.loc.range())
+                            )
+                                .with_message(
+                                    format!("first definition of function {} here", entry.as_str().fg(color2))
+                                )
+                                .with_color(color2)
+                        )
+                        .with_note(
+                            format!("function names must be distinct")
+                        )
+                        .finish()
+                        .print((&self.src_file, Source::from(self.src_content.clone())))
+                        .unwrap();
+
+                    self.errors.add(
+                        format!("duplicate function name `{}`", entry.elem),
+                        fdef.name.loc
+                    );
+                } else {
+                    seen_funcs.insert(fdef.name.elem.clone(), fdef.name.clone());
+                }
+
+                self.tc_fdef(fdef);
+            });
 
         if !self.errors.is_empty() {
             return Err(self.errors.clone());

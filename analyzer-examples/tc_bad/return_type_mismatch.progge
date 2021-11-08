@@ -1,3 +1,13 @@
 fn foo() -> int {
     return true;
 }
+
+fn bar() {
+    return 1;
+}
+
+fn baz() -> int {
+    return;
+}
+
+
