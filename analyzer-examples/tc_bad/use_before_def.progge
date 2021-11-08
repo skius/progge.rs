@@ -1,4 +1,4 @@
-fn analyze(x: int) -> int {
-    x = y;
+fn foo(x: int) -> int {
+    x = y + y;
     return 0;
 }

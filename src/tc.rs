@@ -769,6 +769,8 @@ impl TypeChecker {
                             format!("variable `{}` used before declared", v),
                             v.loc,
                         );
+                        // to avoid a second "used before declared" error
+                        self.curr_s_ty_ctx.insert(v.to_string(), Type::Unknown);
                         Type::Unknown
                     },
                     Some(t) => {
@@ -875,7 +877,7 @@ impl TypeChecker {
                 let left_t = self.tc_exp(left);
                 let right_t = self.tc_exp(right);
 
-                if op_type.0 .0 != left_t {
+                if op_type.0 .0 != left_t && left_t != Type::Unknown {
                     let [color_op, color1, color2] = colors();
 
                     Report::build(ariadne::ReportKind::Error, &self.src_file, left.loc.start)
@@ -910,7 +912,7 @@ impl TypeChecker {
                         left.loc,
                     );
                 }
-                if op_type.0 .1 != right_t {
+                if op_type.0 .1 != right_t && right_t != Type::Unknown {
                     let [color_op, color1, color2] = colors();
 
                     Report::build(ariadne::ReportKind::Error, &self.src_file, right.loc.start)
@@ -952,7 +954,7 @@ impl TypeChecker {
                 let op_type = op.get_type();
                 let inner_t = self.tc_exp(inner);
 
-                if op_type.0 != inner_t {
+                if op_type.0 != inner_t && inner_t != Type::Unknown {
                     let [color_op, color1, color2] = colors();
 
                     Report::build(ariadne::ReportKind::Error, &self.src_file, inner.loc.start)
