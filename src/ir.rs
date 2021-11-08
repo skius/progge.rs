@@ -194,7 +194,7 @@ impl From<&FuncDef> for IntraProcCFG {
         IntraProcCFG {
             graph,
             entry,
-            params: f.params.clone(),
+            params: f.params.elem.clone(),
         }
     }
 }

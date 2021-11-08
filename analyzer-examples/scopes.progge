@@ -1,6 +1,6 @@
-fn analyze() -> int {
+fn analyze(x: int) -> int {
     let x_2 = 10;
-    let x = 0;
+    let x = x;
     let x = x + 1;
     x_2 = 5;
     if true {

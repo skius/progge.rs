@@ -1,0 +1,5 @@
+fn foo() {
+    if 1 {}
+    while 0 + 2 * 3 {}
+    return;
+}

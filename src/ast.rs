@@ -82,7 +82,7 @@ impl Display for Program {
 #[derive(Debug, Clone)]
 pub struct FuncDef {
     pub name: WithLoc<String>,
-    pub params: Vec<Param>,
+    pub params: WithLoc<Vec<Param>>,
     pub retty: WithLoc<Type>,
     pub body: WithLoc<Block>,
 }
@@ -201,7 +201,7 @@ pub enum Expr {
     IntLit(i64),
     BoolLit(bool),
     Var(WithLoc<Var>),
-    Call(WithLoc<String>, Vec<WithLoc<Expr>>),
+    Call(WithLoc<String>, WithLoc<Vec<WithLoc<Expr>>>),
     BinOp(WithLoc<BinOpcode>, Box<WithLoc<Expr>>, Box<WithLoc<Expr>>),
     UnOp(WithLoc<UnOpcode>, Box<WithLoc<Expr>>),
     // Int(WithLoc<IntExpr>),
@@ -221,7 +221,7 @@ impl Expr {
                 fv
             }
             Call(_, args) => {
-                args.into_iter()
+                args.elem.iter()
                     .map(|arg| arg.free_vars())
                     .fold(HashSet::new(), |mut acc, fv| {
                         acc.extend(fv);
@@ -244,7 +244,7 @@ impl Expr {
             Expr::IntLit(_) | Expr::BoolLit(_) => false,
             Expr::Var(v) if v.is_bool() => true,
             Expr::Var(_) => false,
-            Expr::Call(_, args) => args.into_iter().any(|arg| arg.contains_bool_var()),
+            Expr::Call(_, args) => args.iter().any(|arg| arg.contains_bool_var()),
             Expr::BinOp(_, left, right) => left.contains_bool_var() || right.contains_bool_var(),
             Expr::UnOp(_, inner) => inner.contains_bool_var(),
         }
@@ -386,11 +386,15 @@ impl Display for UnOpcode {
 //     Binop(Box<BoolExpr>),
 // }
 
+// TODO: Add Unknown type that can be used during typechecking that just means "ignore me" and causes no cascading errors.
+// TODO: in this vein, also adjust TypeChecker to contain a Vec of errors and only at the end return an Err.
+// maybe add "_internal" variants for that that do not return Results, and a non-_internal wrapper that just calls _internal and then returns Err if self.errors is non-empty
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum Type {
     Int,
     Bool,
     Unit,
+    Unknown,
 }
 
 impl Display for Type {
@@ -400,6 +404,7 @@ impl Display for Type {
             Int => f.write_str("int"),
             Bool => f.write_str("bool"),
             Unit => f.write_str("unit"),
+            Unknown => f.write_str("_unknown_"),
         }
     }
 }
@@ -439,10 +444,18 @@ impl Display for Var {
 pub struct Loc {
     pub line: usize,
     pub col: usize,
+    pub start: usize,
+    pub end: usize,
 }
 
-pub fn loc_from_offset(src: &str, offset: usize) -> Loc {
-    let (line, col) = src[0..offset]
+impl Loc {
+    pub fn range(&self) -> std::ops::Range<usize> {
+        self.start..self.end
+    }
+}
+
+pub fn loc_from_offset(src: &str, start: usize, end: usize) -> Loc {
+    let (line, col) = src[0..start]
         .chars()
         .fold((1, 1), |(line, col), curr_char| {
             if curr_char == '\n' {
@@ -451,7 +464,7 @@ pub fn loc_from_offset(src: &str, offset: usize) -> Loc {
                 (line, col + 1)
             }
         });
-    Loc { line, col }
+    Loc { line, col, start, end }
 }
 
 pub fn sep_string_display<T: Display>(elems: &Vec<T>, sep: &str) -> String {

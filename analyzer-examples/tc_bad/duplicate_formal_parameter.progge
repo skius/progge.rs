@@ -1,0 +1,3 @@
+fn foo(x: int, b: bool, x: int) {
+    return;
+}

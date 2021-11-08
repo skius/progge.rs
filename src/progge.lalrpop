@@ -14,7 +14,7 @@ match {
 }
 
 WithLoc<T>: WithLoc<T> = {
-    <start:@L> <elem:T> => WithLoc { elem: elem, loc: loc_from_offset(src, start) },
+    <start:@L> <elem:T> <end:@R> => WithLoc { elem: elem, loc: loc_from_offset(src, start, end) },
 }
 
 Comma<T>: Vec<T> = {
@@ -52,11 +52,11 @@ CloseScope: () = {
 
 pub FuncDefL = WithLoc<FuncDef>;
 pub FuncDef: FuncDef = {
-    OpenScope "fn" <name:NameL> "(" <params:Comma<Param>> ")" <empty_retty_loc:@L> <retty:("->" <TypeL>)?> "{"
+    OpenScope "fn" <name:NameL> "(" <params:WithLoc<Comma<Param>>> ")" <empty_retty_loc:@L> <retty:("->" <TypeL>)?> "{"
         <body:BlockL>
     "}" CloseScope => FuncDef { name:name, params: params, retty: match retty {
         Some(retty) => retty,
-        None => WithLoc { elem: Type::Unit, loc: loc_from_offset(src, empty_retty_loc) },
+        None => WithLoc { elem: Type::Unit, loc: loc_from_offset(src, empty_retty_loc, empty_retty_loc) },
     }, body: body },
 }
 
@@ -93,7 +93,7 @@ pub StmtBlock: Stmt = {
     OpenScope "if" <e:ExprL> "{"
         <if_b:BlockL>
     "}" <empty_else:@L> CloseScope => Stmt::IfElse { cond: e, if_branch: if_b, else_branch:
-        WithLoc { elem: Block(vec![]), loc: loc_from_offset(src, empty_else) },
+        WithLoc { elem: Block(vec![]), loc: loc_from_offset(src, empty_else, empty_else) },
     },
     OpenScope "if" <e:ExprL> "{"
         <if_b:BlockL>
@@ -153,11 +153,11 @@ LeafExpr: Expr = {
     Int => Expr::IntLit(<>),
     "true" => Expr::BoolLit(true),
     "false" => Expr::BoolLit(false),
-    <n:NameL> "(" <args:Comma<ExprL>> ")" => Expr::Call(n, args),
+    <n:NameL> "(" <args:WithLoc<Comma<ExprL>>> ")" => Expr::Call(n, args),
     <n:NameL> => {
  // TODO: instead of panicking, I could use a placeholder type here to complete the parse
         let t = tctx.lookup(&n).unwrap_or_else(|| {
-            println!("{}:{}:{}: used variable \"{}\" before definition", filename, n.loc.line, n.loc.col, n.elem);
+            // println!("{}:{}:{}: used variable \"{}\" before definition", filename, n.loc.line, n.loc.col, n.elem);
             // panic!("variable use before defined");
             // We are implementing above TODO currently.
             Type::Unit

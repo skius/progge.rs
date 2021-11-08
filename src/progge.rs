@@ -19,10 +19,9 @@ fn main() -> Result<(), TcError> {
 
     let config = parse_args();
 
-
     let src_file = &config.src_file;
-
-    let src = read_to_string(src_file).unwrap();
+    // .replace bugfix for ariadne's CRLF bug
+    let src = read_to_string(src_file).expect(&format!("couldn't read file {}", src_file)).replace("\r\n", "\n");
     let mut tctx = VariableTypeContext::new();
     let mut prog: WithLoc<Program> = progge::ProgramLParser::new()
         .parse(src_file, &src, &mut tctx, &src)
@@ -36,7 +35,7 @@ fn main() -> Result<(), TcError> {
     }
     if config.do_tc {
         // typechcek the program
-        let mut tc = TypeChecker::new(FuncTypeContext::from(&*prog), src_file);
+        let mut tc = TypeChecker::new(FuncTypeContext::from(&*prog), src_file, src.clone());
         let res = tc.tc_prog(&mut prog);
         if let Err(err) = res {
             eprintln!("Error while type-checking {}:", src_file);
@@ -120,3 +119,4 @@ fn parse_args() -> Config {
 
     cfg
 }
+

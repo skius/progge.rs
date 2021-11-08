@@ -1,0 +1,11 @@
+fn foo() -> int {
+    return bar(baz());
+}
+
+fn baz() -> int {
+    return 0;
+}
+
+fn bar(b: bool) -> int {
+    return 0;
+}
