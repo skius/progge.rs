@@ -1,0 +1,9 @@
+fn foo() -> int {
+    if true {
+        return 1;
+    }
+}
+
+fn bar() {
+    let x = 0;
+}

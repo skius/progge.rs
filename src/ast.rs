@@ -82,7 +82,7 @@ impl Display for Program {
 #[derive(Debug, Clone)]
 pub struct FuncDef {
     pub name: WithLoc<String>,
-    pub params: Vec<Param>,
+    pub params: WithLoc<Vec<Param>>,
     pub retty: WithLoc<Type>,
     pub body: WithLoc<Block>,
 }
@@ -201,7 +201,7 @@ pub enum Expr {
     IntLit(i64),
     BoolLit(bool),
     Var(WithLoc<Var>),
-    Call(WithLoc<String>, Vec<WithLoc<Expr>>),
+    Call(WithLoc<String>, WithLoc<Vec<WithLoc<Expr>>>),
     BinOp(WithLoc<BinOpcode>, Box<WithLoc<Expr>>, Box<WithLoc<Expr>>),
     UnOp(WithLoc<UnOpcode>, Box<WithLoc<Expr>>),
     // Int(WithLoc<IntExpr>),
@@ -221,7 +221,7 @@ impl Expr {
                 fv
             }
             Call(_, args) => {
-                args.into_iter()
+                args.elem.iter()
                     .map(|arg| arg.free_vars())
                     .fold(HashSet::new(), |mut acc, fv| {
                         acc.extend(fv);
@@ -244,7 +244,7 @@ impl Expr {
             Expr::IntLit(_) | Expr::BoolLit(_) => false,
             Expr::Var(v) if v.is_bool() => true,
             Expr::Var(_) => false,
-            Expr::Call(_, args) => args.into_iter().any(|arg| arg.contains_bool_var()),
+            Expr::Call(_, args) => args.iter().any(|arg| arg.contains_bool_var()),
             Expr::BinOp(_, left, right) => left.contains_bool_var() || right.contains_bool_var(),
             Expr::UnOp(_, inner) => inner.contains_bool_var(),
         }
@@ -446,6 +446,12 @@ pub struct Loc {
     pub col: usize,
     pub start: usize,
     pub end: usize,
+}
+
+impl Loc {
+    pub fn range(&self) -> std::ops::Range<usize> {
+        self.start..self.end
+    }
 }
 
 pub fn loc_from_offset(src: &str, start: usize, end: usize) -> Loc {

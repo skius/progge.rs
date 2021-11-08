@@ -1,6 +1,4 @@
 fn foo() -> int {
-    y = 2;
-    let x = y + z;
     return bar(baz());
 }
 
@@ -11,5 +9,3 @@ fn baz() -> int {
 fn bar(b: bool) -> int {
     return 0;
 }
-
-//

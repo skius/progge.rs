@@ -150,7 +150,7 @@ impl ScopedTypeContext {
     // pub fn graphviz(self: &Rc<ScopedTypeContext>) -> String {}
 }
 
-pub struct FuncTypeContext(HashMap<String, (Vec<Param>, Type)>);
+pub struct FuncTypeContext(HashMap<String, (WithLoc<String>, WithLoc<Vec<Param>>, WithLoc<Type>)>);
 
 impl<P: Borrow<Program>> From<P> for FuncTypeContext {
     fn from(p: P) -> Self {
@@ -158,8 +158,8 @@ impl<P: Borrow<Program>> From<P> for FuncTypeContext {
             .borrow()
             .0
             .iter()
-            .map(|fd| (&*fd.name, (&fd.params, &*fd.retty)))
-            .map(|(name, (params, retty))| (name.clone(), (params.clone(), retty.clone())))
+            .map(|fd| (&fd.name, (&fd.params, &fd.retty)))
+            .map(|(name, (params, retty))| (name.elem.clone(), (name.clone(), params.clone(), retty.clone())))
             .collect::<HashMap<_, _>>();
 
         FuncTypeContext(map)
@@ -167,7 +167,7 @@ impl<P: Borrow<Program>> From<P> for FuncTypeContext {
 }
 
 impl Deref for FuncTypeContext {
-    type Target = HashMap<String, (Vec<Param>, Type)>;
+    type Target = HashMap<String, (WithLoc<String>, WithLoc<Vec<Param>>, WithLoc<Type>)>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -325,25 +325,73 @@ impl TypeChecker {
         // self.open_scope();
 
         fdef.params.iter_mut().for_each(|param| {
-            self.curr_s_ty_ctx.insert(param.0.to_string(), *param.1);
-            self.disambig_var(&mut param.0);
             param.0.set_type(*param.1);
 
-
             if let Some(entry) = seen_params.get(param.0.as_str()) {
+                let [color1, color2] = colors();
+
+                Report::build(ariadne::ReportKind::Error, &self.src_file, param.0.loc.start)
+                    .with_message::<&str>("duplicate formal parameter")
+                    .with_label(
+                        Label::new(
+                            (&self.src_file, param.0.loc.range())
+                        )
+                        .with_message(
+                            format!("parameter {} redefined here", param.0.to_string().fg(color1))
+                        )
+                        .with_color(color1)
+                    )
+                    .with_label(
+                        Label::new(
+                            (&self.src_file, entry.loc.range())
+                        )
+                        .with_message(
+                            format!("first definition of parameter {} here", entry.to_string().fg(color2))
+                        )
+                        .with_color(color2)
+                    )
+                    .with_note(
+                        format!("a function's formal parameters must be distinct")
+                    )
+                    .finish()
+                    .print((&self.src_file, Source::from(self.src_content.clone())))
+                    .unwrap();
+
                 self.errors.add(
                     format!("duplicate formal parameter `{}`", entry.elem),
                     param.0.loc,
                 );
             } else {
                 seen_params.insert(param.0.to_string(), param.0.clone());
+                self.curr_s_ty_ctx.insert(param.0.to_string(), *param.1);
+                self.disambig_var(&mut param.0);
             }
         });
 
-        let retty_expected = *fdef.retty;
+        let retty_expected = fdef.retty.clone();
         let returns_res = self.tc_block(&mut fdef.body, retty_expected);
         match returns_res {
             None => {
+                let [color_ret, color1] = colors();
+
+                Report::build(ariadne::ReportKind::Error, &self.src_file, fdef.name.loc.start)
+                    .with_message::<&str>("function may not return")
+                    .with_label(
+                        Label::new(
+                            (&self.src_file, fdef.name.loc.range())
+                        )
+                        .with_message(
+                            format!("function {} may not {}", fdef.name.to_string().fg(color1), "return".fg(color_ret))
+                        )
+                        .with_color(color1)
+                    )
+                    .with_note(
+                        format!("all paths through a function must end in a {}-statement", "return".fg(color_ret))
+                    )
+                    .finish()
+                    .print((&self.src_file, Source::from(self.src_content.clone())))
+                    .unwrap();
+
                 self.errors.add(
                     format!(
                         "function `{}` is missing an explicit `return` statement",
@@ -353,15 +401,16 @@ impl TypeChecker {
                 )
             },
             Some(t) => {
-                if t != *fdef.retty {
-                    self.errors.add(
-                        format!(
-                            "function `{}` returns type `{}`, expected `{}`",
-                            fdef.name, t, fdef.retty
-                        ),
-                        fdef.loc,
-                    )
-                }
+                // I don't think we need this, return handles this already
+                // if t != *fdef.retty {
+                //     self.errors.add(
+                //         format!(
+                //             "function `{}` returns type `{}`, expected `{}`",
+                //             fdef.name, t, fdef.retty
+                //         ),
+                //         fdef.loc,
+                //     )
+                // }
             }
         }
     }
@@ -371,14 +420,14 @@ impl TypeChecker {
     // TODO: maybe also change all Results to actually be tuples, because we're doing
     // "recoverable" errors? by which I mean grabbing as many errors as possible in one go
     // for that we need to proceed even after a sub-call fails
-    pub fn tc_block(&mut self, block: &mut WithLoc<Block>, retty_expected: Type) -> Option<Type> {
+    pub fn tc_block(&mut self, block: &mut WithLoc<Block>, retty_expected: WithLoc<Type>) -> Option<Type> {
         // open type-check scope
         let prev_scope = self.curr_s_ty_ctx.clone();
         self.open_scope();
 
 
         let returns = block.iter_mut().fold(None, |returns, stmt| {
-            let stmt_returns = self.tc_stmt(stmt, retty_expected);
+            let stmt_returns = self.tc_stmt(stmt, retty_expected.clone());
 
             returns.or(stmt_returns)
         });
@@ -389,7 +438,7 @@ impl TypeChecker {
         returns
     }
 
-    pub fn tc_stmt(&mut self, stmt: &mut WithLoc<Stmt>, retty_expected: Type) -> Option<Type> {
+    pub fn tc_stmt(&mut self, stmt: &mut WithLoc<Stmt>, retty_expected: WithLoc<Type>) -> Option<Type> {
 
         let res = match &mut stmt.elem {
             Stmt::Testcase() => None,
@@ -401,7 +450,36 @@ impl TypeChecker {
                     None => (Type::Unit, stmt.loc),
                 };
 
-                if retty != retty_expected {
+                if retty != *retty_expected {
+                    let [color1, color2] = colors();
+
+                    Report::build(ariadne::ReportKind::Error, &self.src_file, loc.start)
+                        .with_message::<&str>("return type mismatch")
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, loc.range())
+                            )
+                                .with_message(
+                                    format!("returned expression has type {}", retty.to_string().fg(color1))
+                                )
+                                .with_color(color1)
+                        )
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, retty_expected.loc.range())
+                            )
+                                .with_message(
+                                    format!("expected return type is {}", retty_expected.to_string().fg(color2))
+                                )
+                                .with_color(color2)
+                        )
+                        .with_note(
+                            format!("functions must return their specified types")
+                        )
+                        .finish()
+                        .print((&self.src_file, Source::from(self.src_content.clone())))
+                        .unwrap();
+
                     self.errors.add(
                         format!("returning type `{}` but expected type `{}`", retty, retty_expected),
                         loc,
@@ -426,23 +504,79 @@ impl TypeChecker {
             Stmt::Assn(v, e) => {
                 // println!("in assn: {}", stmt);
 
+                let t = self.tc_exp(e);
+                // println!("in assn: {}", &t_exp_res.clone().unwrap());
+
                 let mut curr_ty = self.curr_s_ty_ctx.lookup(v.as_str());
                 if curr_ty.is_none() {
+                    let [color1, color2] = colors();
+
+                    Report::build(ariadne::ReportKind::Error, &self.src_file, v.loc.start)
+                        .with_message::<&str>("variable assigned to before declared")
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, v.loc.range())
+                            )
+                                .with_message(
+                                    format!("variable {} assigned to before declared", v.elem.as_str().fg(color1))
+                                )
+                                .with_color(color1)
+                        )
+                        .with_note(
+                            format!(
+                                "variables must be introduced e.g. by a {}-statement prior to being assigned",
+                                "let".fg(color2)
+                            )
+                        )
+                        .finish()
+                        .print((&self.src_file, Source::from(self.src_content.clone())))
+                        .unwrap();
+
                     self.errors.add(
                         format!("variable `{}` is assigned to before declared", v),
                         stmt.loc,
                     );
-                    curr_ty = Some(Type::Unknown);
+
+                    // To allow further type checking, we just pretend the variable has been declared with the type returned by tc_exp
+                    curr_ty = Some(t);
+                    self.curr_s_ty_ctx.insert(v.to_string(), t);
                 }
 
                 let curr_ty = curr_ty.unwrap();
 
-                let t = self.tc_exp(e);
-                // println!("in assn: {}", &t_exp_res.clone().unwrap());
 
-                // TODO: Ignore unknown
+
+                // To allow continuing type checking, we set the type to the possibly incorrect expression's type
                 v.set_type(t);
-                if t != curr_ty {
+
+                if t != curr_ty && t != Type::Unknown {
+                    let [color_var, color1, color2] = colors();
+
+                    Report::build(ariadne::ReportKind::Error, &self.src_file, e.loc.start)
+                        .with_message::<&str>("variable assignment type mismatch")
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, e.loc.range())
+                            )
+                                .with_message(
+                                    format!(
+                                        "assigned expression of type {}, but variable {} is of type {}",
+                                        t.fg(color2),
+                                        v.elem.as_str().fg(color_var),
+                                        curr_ty.fg(color1),
+                                    )
+                                )
+                                .with_color(color2)
+                        )
+                        .with_note(
+                            format!(
+                                "variables must always be assigned their type"
+                            )
+                        )
+                        .finish()
+                        .print((&self.src_file, Source::from(self.src_content.clone())))
+                        .unwrap();
+
                     self.errors.add(
                         format!("type `{}` of expression doesn't match type `{}` of variable `{}`", t, curr_ty, v),
                         e.loc,
@@ -459,6 +593,33 @@ impl TypeChecker {
             } => {
                 let cond_t_res = self.tc_exp(cond);
                 if cond_t_res != Type::Bool {
+                    let [color1, color2] = colors();
+
+                    Report::build(ariadne::ReportKind::Error, &self.src_file, cond.loc.start)
+                        .with_message::<&str>("condition type mismatch")
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, cond.loc.range())
+                            )
+                                .with_message(
+                                    format!(
+                                        "condition is of type {}, but must be of type {}",
+                                        cond_t_res.to_string().fg(color1),
+                                        "bool".fg(color2)
+                                    )
+                                )
+                                .with_color(color1)
+                        )
+                        .with_note(
+                            format!(
+                                "conditions must always be {}s",
+                                "bool".fg(color2)
+                            )
+                        )
+                        .finish()
+                        .print((&self.src_file, Source::from(self.src_content.clone())))
+                        .unwrap();
+
                     self.errors.add(
                      format!(
                             "if condition is of type `{}`, must be of type `{}`",
@@ -471,17 +632,44 @@ impl TypeChecker {
 
                 // go on, treat cond as if it were a bool.
 
-                let if_res = self.tc_block(if_branch, retty_expected);
-                let else_res = self.tc_block(else_branch, retty_expected);
+                let if_res = self.tc_block(if_branch, retty_expected.clone());
+                let else_res = self.tc_block(else_branch, retty_expected.clone());
 
                 if_res.and(else_res)
             }
             Stmt::While { cond, block } => {
                 let cond_t_res = self.tc_exp(cond);
                 if cond_t_res != Type::Bool {
+                    let [color1, color2] = colors();
+
+                    Report::build(ariadne::ReportKind::Error, &self.src_file, cond.loc.start)
+                        .with_message::<&str>("condition type mismatch")
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, cond.loc.range())
+                            )
+                                .with_message(
+                                    format!(
+                                        "condition is of type {}, but must be of type {}",
+                                        cond_t_res.to_string().fg(color1),
+                                        "bool".fg(color2)
+                                    )
+                                )
+                                .with_color(color1)
+                        )
+                        .with_note(
+                            format!(
+                                "conditions must always be {}s",
+                                "bool".fg(color2)
+                            )
+                        )
+                        .finish()
+                        .print((&self.src_file, Source::from(self.src_content.clone())))
+                        .unwrap();
+
                     self.errors.add(
                      format!(
-                            "if condition is of type `{}`, must be of type `{}`",
+                            "while condition is of type `{}`, must be of type `{}`",
                             cond_t_res,
                             Type::Bool
                         ),
@@ -492,7 +680,7 @@ impl TypeChecker {
 
                 // go on, treat cond as if it were a bool.
 
-                let block_res = self.tc_block(block, retty_expected);
+                let block_res = self.tc_block(block, retty_expected.clone());
 
                 block_res
             }
@@ -511,6 +699,9 @@ impl TypeChecker {
                     None => {
                         // TODO: Pass "print errors" flag that prints errors with ariadne live, otherwise just accumulate them and return
                         // TODO: extract v.loc.start..v.loc.end into v.loc.span()
+
+                        let [color1, color2] = colors();
+
                         Report::build(ariadne::ReportKind::Error, &self.src_file, v.loc.start)
                             .with_message::<&str>("variable used before declared")
                             .with_label(
@@ -518,9 +709,15 @@ impl TypeChecker {
                                     (&self.src_file, v.loc.start..v.loc.end)
                                 )
                                 .with_message(
-                                    format!("variable {} used before declared", v.elem.as_str().fg(Color::Red))
+                                    format!("variable {} used before declared", v.elem.as_str().fg(color1))
                                 )
-                                .with_color(Color::Red)
+                                .with_color(color1)
+                            )
+                            .with_note(
+                                format!(
+                                    "variables must be introduced e.g. by a {}-statement prior to being used",
+                                    "let".fg(color2)
+                                )
                             )
                             .finish()
                             .print((&self.src_file, Source::from(self.src_content.clone())))
@@ -541,13 +738,42 @@ impl TypeChecker {
             }
             Expr::Call(name, args) => {
                 // TODO: Typecheck that function exists
-                let (param_tys, retty) = &self.f_ty_ctx[name.as_str()];
-                let retty = *retty;
+                let (_, param_tys, retty) = &self.f_ty_ctx[name.as_str()];
+                let retty = **retty;
 
                 let params_len = param_tys.len();
                 let args_len = args.len();
 
                 if params_len != args_len {
+                    let [color_name, color1, color2] = colors();
+
+                    Report::build(ariadne::ReportKind::Error, &self.src_file, exp.loc.start)
+                        .with_message::<&str>("argument count mismatch")
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, args.loc.start..args.loc.end)
+                                )
+                                .with_message(
+                                    format!("call to function {} with {} arguments", name.as_str().fg(color_name), args_len.to_string().fg(color1))
+                                )
+                                .with_color(color1)
+                        )
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, param_tys.loc.start..param_tys.loc.end)
+                            )
+                                .with_message(
+                                    format!("function {} has {} parameters", name.as_str().fg(color_name), params_len.to_string().fg(color2))
+                                )
+                                .with_color(color2)
+                        )
+                        .with_note(
+                            format!("function calls must provide the same number of arguments as the function expects")
+                        )
+                        .finish()
+                        .print((&self.src_file, Source::from(self.src_content.clone())))
+                        .unwrap();
+
                     self.errors.add(
                         format!("argument count mismatch for call to `{}`: {} args given but function expects {}", name, args_len, params_len),
                         exp.loc,
@@ -560,10 +786,7 @@ impl TypeChecker {
                     let arg_t = self.tc_exp(arg);
 
                     if arg_t != *param_t {
-                        let mut colors = ColorGenerator::new();
-
-                        let a = colors.next();
-                        let b = colors.next();
+                        let [a, b] = colors();
                         
                         self.report("argument type mismatch", arg.loc.start)
                         .with_label(
@@ -584,7 +807,13 @@ impl TypeChecker {
                             )
                             .with_color(b)
                         )
-                        .with_note(format!("the types of {} and respective {} must match in a call expression", "arguments".fg(a), "parameters".fg(b)))
+                        .with_note(
+                            format!(
+                                "the types of {} and respective {} must match in a call expression",
+                                "arguments".fg(a),
+                                "parameters".fg(b)
+                            )
+                        )
                         .finish()
                         .print((&self.src_file, Source::from(self.src_content.clone())))
                         .unwrap();
@@ -605,6 +834,32 @@ impl TypeChecker {
                 let right_t = self.tc_exp(right);
 
                 if op_type.0 .0 != left_t {
+                    let [color_op, color1, color2] = colors();
+
+                    Report::build(ariadne::ReportKind::Error, &self.src_file, left.loc.start)
+                        .with_message::<&str>("operator type mismatch")
+                        .with_label(
+                        Label::new(
+                                (&self.src_file, left.loc.range())
+                            )
+                            .with_message(
+                                format!("first operand of {} is of type {}", op.to_string().fg(color_op), left_t.to_string().fg(color1))
+                            )
+                            .with_color(color1)
+                        )
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, op.loc.range())
+                            )
+                            .with_message(
+                                format!("operator {} expects {} and {}", op.to_string().fg(color_op), op_type.0.0.to_string().fg(color2), op_type.0.1.to_string().fg(color2))
+                            )
+                            .with_color(color_op)
+                        )
+                        .finish()
+                        .print((&self.src_file, Source::from(self.src_content.clone())))
+                        .unwrap();
+
                     self.errors.add(
                         format!(
                             "first argument of `{}` is type `{}`, but must be type `{}`",
@@ -614,6 +869,32 @@ impl TypeChecker {
                     );
                 }
                 if op_type.0 .1 != right_t {
+                    let [color_op, color1, color2] = colors();
+
+                    Report::build(ariadne::ReportKind::Error, &self.src_file, right.loc.start)
+                        .with_message::<&str>("operator type mismatch")
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, right.loc.range())
+                            )
+                                .with_message(
+                                    format!("second operand of {} is of type {}", op.to_string().fg(color_op), right_t.to_string().fg(color1))
+                                )
+                                .with_color(color1)
+                        )
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, op.loc.range())
+                            )
+                                .with_message(
+                                    format!("operator {} expects {} and {}", op.to_string().fg(color_op), op_type.0.0.to_string().fg(color2), op_type.0.1.to_string().fg(color2))
+                                )
+                                .with_color(color_op)
+                        )
+                        .finish()
+                        .print((&self.src_file, Source::from(self.src_content.clone())))
+                        .unwrap();
+
                     self.errors.add(
                         format!(
                             "second argument of `{}` is type `{}`, but must be type `{}`",
@@ -630,6 +911,32 @@ impl TypeChecker {
                 let inner_t = self.tc_exp(inner);
 
                 if op_type.0 != inner_t {
+                    let [color_op, color1, color2] = colors();
+
+                    Report::build(ariadne::ReportKind::Error, &self.src_file, inner.loc.start)
+                        .with_message::<&str>("operator type mismatch")
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, inner.loc.range())
+                            )
+                            .with_message(
+                                format!("operand of {} is of type {}", op.to_string().fg(color_op), inner_t.to_string().fg(color1))
+                            )
+                            .with_color(color1)
+                        )
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, op.loc.range())
+                            )
+                            .with_message(
+                                format!("operator {} expects {}", op.to_string().fg(color_op), op_type.0.to_string().fg(color2))
+                            )
+                            .with_color(color_op)
+                        )
+                        .finish()
+                        .print((&self.src_file, Source::from(self.src_content.clone())))
+                        .unwrap();
+
                     self.errors.add(
                         format!(
                             "argument of `{}` is type {}, but must be type {}",
@@ -649,9 +956,8 @@ impl TypeChecker {
 fn colors<const N: usize>() -> [Color; N] {
     let mut color_gen = ColorGenerator::new();
 
-    let colors = (0..N).map(|_| color_gen.next()).collect::<Vec<_>>();
     let res = [0usize; N];
-    res.map(|i| colors[i])
+    res.map(|_| color_gen.next())
 }
 
 // THESE ARE USED FOR THE PARSER AT THE MOMENT:

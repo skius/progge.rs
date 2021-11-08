@@ -1,0 +1,5 @@
+fn analyze(x: int) -> int {
+    y = x;
+    y = x;
+    return 0;
+}

@@ -52,7 +52,7 @@ CloseScope: () = {
 
 pub FuncDefL = WithLoc<FuncDef>;
 pub FuncDef: FuncDef = {
-    OpenScope "fn" <name:NameL> "(" <params:Comma<Param>> ")" <empty_retty_loc:@L> <retty:("->" <TypeL>)?> "{"
+    OpenScope "fn" <name:NameL> "(" <params:WithLoc<Comma<Param>>> ")" <empty_retty_loc:@L> <retty:("->" <TypeL>)?> "{"
         <body:BlockL>
     "}" CloseScope => FuncDef { name:name, params: params, retty: match retty {
         Some(retty) => retty,
@@ -153,7 +153,7 @@ LeafExpr: Expr = {
     Int => Expr::IntLit(<>),
     "true" => Expr::BoolLit(true),
     "false" => Expr::BoolLit(false),
-    <n:NameL> "(" <args:Comma<ExprL>> ")" => Expr::Call(n, args),
+    <n:NameL> "(" <args:WithLoc<Comma<ExprL>>> ")" => Expr::Call(n, args),
     <n:NameL> => {
  // TODO: instead of panicking, I could use a placeholder type here to complete the parse
         let t = tctx.lookup(&n).unwrap_or_else(|| {
