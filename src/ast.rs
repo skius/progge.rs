@@ -386,11 +386,15 @@ impl Display for UnOpcode {
 //     Binop(Box<BoolExpr>),
 // }
 
+// TODO: Add Unknown type that can be used during typechecking that just means "ignore me" and causes no cascading errors.
+// TODO: in this vein, also adjust TypeChecker to contain a Vec of errors and only at the end return an Err.
+// maybe add "_internal" variants for that that do not return Results, and a non-_internal wrapper that just calls _internal and then returns Err if self.errors is non-empty
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum Type {
     Int,
     Bool,
     Unit,
+    Unknown,
 }
 
 impl Display for Type {
@@ -400,6 +404,7 @@ impl Display for Type {
             Int => f.write_str("int"),
             Bool => f.write_str("bool"),
             Unit => f.write_str("unit"),
+            Unknown => f.write_str("_unknown_"),
         }
     }
 }

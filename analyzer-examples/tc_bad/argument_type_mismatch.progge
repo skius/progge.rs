@@ -1,4 +1,6 @@
 fn foo() -> int {
+    y = 2;
+    let x = y + z;
     return bar(baz());
 }
 
