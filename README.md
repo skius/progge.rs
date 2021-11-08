@@ -70,12 +70,12 @@ fn analyze(x: int, y: int) -> int {
 ```
 ![numerical analysis CFG](analyzer-examples/numerical.png)
 
-[**Type-checking**](analyzer-examples/scopes.progge): Proggers notices that there are three distinct variables called `x`, as one can see in the cleaned-up AST that Proggers returns:
+[**Type-checking**](analyzer-examples/scopes.progge): Proggers notices that there are five distinct variables called `x`, as one can see in the cleaned-up AST that Proggers returns:
 ```rust 
 // Original source code
-fn analyze() -> int {
+fn analyze(x: int) -> int {
     let x_2 = 10;
-    let x = 0;
+    let x = x;
     let x = x + 1;
     x_2 = 5;
     if true {
@@ -91,17 +91,18 @@ fn analyze() -> int {
 
 
 // Type-checked AST
-fn analyze() {
+fn analyze(x_1: int) {
     let x_2_1 = 10;
-    let x_1 = 0;
-    let x_2 = (x_1 + 1);
+    let x_2 = x_1;
+    let x_3 = (x_2 + 1);
     x_2_1 = 5;
     if true {
-        let x_3 = 2;
-        x_3 = 3;
+        let x_4 = 2;
+        x_4 = 3;
     } else {
-        let x_4 = 4;
+        let x_5 = 4;
     }
-    return x_2;
+    return x_3;
 }
+
 ```
