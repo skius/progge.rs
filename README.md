@@ -42,7 +42,7 @@ expr:       var
             | var(expr,*)
 binop:      + | - | * | / | % | < | <= | > | >= | == | !=
 unop:       - | !
-var:        [a-zA-Z][a-zA-Z0-9_]*
+var:        [A-Za-z_][A-Za-z0-9_]*
 type:       int | bool
 
 ```
