@@ -106,3 +106,14 @@ fn analyze(x_1: int) {
 }
 
 ```
+
+Furthermore, Progge is able to give nice error messages (thanks to [ariadne](https://github.com/zesterer/ariadne)):
+```rust
+// Source
+fn foo() -> int {
+    return true;
+}
+```
+![error message in terminal](analyzer-examples/tc_bad/return_type_mismatch.png)
+
+See [`analyzer-examples/tc_bad`](analyzer-examples/tc_bad) for more examples.
