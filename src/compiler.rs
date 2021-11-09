@@ -52,7 +52,7 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
         builder.build_alloca(self.context.i64_type(), name)
     }
 
-    fn compile_ty(&mut self, t: Type) -> BasicMetadataTypeEnum<'ctx> {
+    fn compile_ty(&mut self, t: &Type) -> BasicMetadataTypeEnum<'ctx> {
         match t {
             Type::Int => self.context.i64_type().into(),
             Type::Bool => self.context.bool_type().into(),
@@ -238,7 +238,7 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
     fn compile_fndef(&mut self, f: &FuncDef) -> FunctionValue<'ctx> {
         let args_types = f.params.iter()
             .map(|(_, t)| {
-                self.compile_ty(**t)
+                self.compile_ty(t)
             })
             .collect::<Vec<BasicMetadataTypeEnum>>();
         let args_types = args_types.as_slice();
@@ -249,7 +249,7 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
         //     Type::Bool => self.context.bool_type().into(),
         //     _ => panic!("Unsupported type: {:?}", t)
         // };
-        let fn_type = match *f.retty {
+        let fn_type = match &*f.retty {
             Type::Unit => self.context.void_type().fn_type(args_types, false),
             Type::Int => self.context.i64_type().fn_type(args_types, false),
             Type::Bool => self.context.bool_type().fn_type(args_types, false),

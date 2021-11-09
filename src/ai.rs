@@ -300,10 +300,11 @@ fn handle_irnode<M: Manager>(
         }
         IRCBranch(cond) => {
             // We don't analyze boolean variables currently, so we overapproximate
-            if cond.contains_bool_var() {
-                let taken = state.clone();
-                return Some(taken);
-            }
+            // if cond.contains_bool_var() {
+            //     let taken = state.clone();
+            //     return Some(taken);
+            // }
+            // Handling this now via Hcons::Top
 
             let hcons = bool_expr_to_hcons(env, cond);
             let mut taken = state.clone();
@@ -322,10 +323,12 @@ fn bool_expr_to_hcons(env: &Environment, expr: &Expr) -> Hcons {
         IntLit(_) => panic!("IntLit is not a bool_expr. Type-checking should have caught this"),
         BoolLit(true) => Texpr::int(0).lt(Texpr::int(1)).into(),
         BoolLit(false) => Texpr::int(0).lt(Texpr::int(0)).into(),
-        Var(_) => panic!("bool variables are unsupported at the moment"),
+        // Var(_) => panic!("bool variables are unsupported at the moment"),
+        Var(_) => Hcons::Top,
         // TODO: make call just go to top by default, and maybe a second run where it utilizes
         // a previous run's AI results.
-        Call(_, _) => panic!("calls are unsupported at the moment"),
+        // Call(_, _) => panic!("calls are unsupported at the moment"),
+        Call(_, _) => Hcons::Top,
         BinOp(WithLoc { elem: op, .. }, left, right) => {
             // op must be int * int -> bool
             // or bool * bool -> bool
@@ -380,6 +383,7 @@ fn bool_expr_to_hcons(env: &Environment, expr: &Expr) -> Hcons {
             }
             _ => panic!("arithmetic unop in a bool expr"),
         },
+        e => panic!("unsupported expr: {:?}", e),
     }
 }
 
@@ -389,7 +393,8 @@ fn int_expr_to_texpr(env: &Environment, expr: &Expr) -> Texpr {
     match expr {
         IntLit(i) => Texpr::int(*i),
         Var(v) => Texpr::var(env, v.as_str()),
-        c@Call(_, _) => panic!("conversion of calls to texpr not supported yet {}", c),
+        // c@Call(_, _) => panic!("conversion of calls to texpr not supported yet {}", c),
+        Call(_, _) => Texpr::top(),
         BinOp(WithLoc { elem: op, .. }, left, right) => {
             Texpr::binop(
                 int_binop_to_texpr_binop(op),

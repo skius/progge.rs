@@ -42,10 +42,10 @@ impl ScopedTypeContext {
         })
     }
 
-    pub fn insert(self: &Rc<ScopedTypeContext>, s: String, t: Type) {
+    pub fn insert(self: &Rc<ScopedTypeContext>, s: String, t: &Type) {
         *self.var_counts.deref().borrow_mut().entry(s.clone()).or_insert(0) += 1;
         let count = *self.var_counts.deref().borrow().get(s.as_str()).unwrap();
-        self.var_type.borrow_mut().insert(s.clone(), t);
+        self.var_type.borrow_mut().insert(s.clone(), t.clone());
         // let depth = self.depth_of_var(s.as_str()).unwrap();
         // let name = if count != 1 {
         //     format!("{}_{}", s, count)
@@ -91,7 +91,7 @@ impl ScopedTypeContext {
         let mut curr = Some(self.clone());
 
         while let Some(ctx) = curr {
-            let entry = ctx.var_type.borrow().get(s).map(|t| *t);
+            let entry = ctx.var_type.borrow().get(s).map(|t| t.clone());
             if let Some(t) = entry {
                 return Some((t, ctx));
             }
@@ -380,7 +380,7 @@ impl TypeChecker {
         // self.open_scope();
 
         fdef.params.iter_mut().for_each(|param| {
-            param.0.set_type(*param.1);
+            param.0.set_type(&param.1);
 
             if let Some(entry) = seen_params.get(param.0.as_str()) {
                 let [color1, color2] = colors();
@@ -418,7 +418,7 @@ impl TypeChecker {
                 );
             } else {
                 seen_params.insert(param.0.to_string(), param.0.clone());
-                self.curr_s_ty_ctx.insert(param.0.to_string(), *param.1);
+                self.curr_s_ty_ctx.insert(param.0.to_string(), &param.1);
                 self.disambig_var(&mut param.0);
             }
         });
@@ -550,10 +550,10 @@ impl TypeChecker {
                 // let binding opens a new scope
                 self.open_scope();
 
-                self.curr_s_ty_ctx.insert(v.to_string(), t);
+                self.curr_s_ty_ctx.insert(v.to_string(), &t);
                 // println!("inserted: {}", t_exp);
                 self.disambig_var(&mut *v);
-                v.set_type(t);
+                v.set_type(&t);
                 None
             }
             Stmt::Assn(v, e) => {
@@ -593,8 +593,8 @@ impl TypeChecker {
                     );
 
                     // To allow further type checking, we just pretend the variable has been declared with the type returned by tc_exp
-                    curr_ty = Some(t);
-                    self.curr_s_ty_ctx.insert(v.to_string(), t);
+                    self.curr_s_ty_ctx.insert(v.to_string(), &t);
+                    curr_ty = Some(t.clone());
                 }
 
                 let curr_ty = curr_ty.unwrap();
@@ -617,9 +617,9 @@ impl TypeChecker {
                                 .with_message(
                                     format!(
                                         "assigned expression of type {}, but variable {} is of type {}",
-                                        t.fg(color2),
+                                        (&t).fg(color2),
                                         v.elem.as_str().fg(color_var),
-                                        curr_ty.fg(color1),
+                                        (&curr_ty).fg(color1),
                                     )
                                 )
                                 .with_color(color2)
@@ -634,7 +634,7 @@ impl TypeChecker {
                         .unwrap();
 
                     self.errors.add(
-                        format!("type `{}` of expression doesn't match type `{}` of variable `{}`", t, curr_ty, v),
+                        format!("type `{}` of expression doesn't match type `{}` of variable `{}`", &t, &curr_ty, v),
                         e.loc,
                     );
                 }
@@ -784,12 +784,12 @@ impl TypeChecker {
                             v.loc,
                         );
                         // to avoid a second "used before declared" error
-                        self.curr_s_ty_ctx.insert(v.to_string(), Type::Unknown);
+                        self.curr_s_ty_ctx.insert(v.to_string(), &Type::Unknown);
                         Type::Unknown
                     },
                     Some(t) => {
                         self.disambig_var(&mut *v);
-                        v.set_type(t);
+                        v.set_type(&t);
                         t
                     },
                 }
@@ -797,7 +797,7 @@ impl TypeChecker {
             Expr::Call(name, args) => {
                 // TODO: Typecheck that function exists
                 let (_, param_tys, retty) = &self.f_ty_ctx[name.as_str()];
-                let retty = **retty;
+                let retty = (**retty).clone();
 
                 let params_len = param_tys.len();
                 let args_len = args.len();
@@ -1006,6 +1006,56 @@ impl TypeChecker {
 
                 op_type.1
             }
+            Expr::Array(els) => {
+                let mut t = Type::Unknown;
+                let mut first_el_loc = Loc {
+                    start: 0,
+                    end: 0,
+                    col: 0,
+                    line: 0,
+                };
+                for el in els.iter_mut() {
+                    let el_t = self.tc_exp(el);
+                    if t == Type::Unknown {
+                        t = el_t;
+                        first_el_loc = el.loc.clone();
+                    } else if t != el_t {
+                        let [color1, color2] = colors();
+
+                        self.report("array element type mismatch", el.loc.start)
+                            .with_label(
+                                Label::new(
+                                    (&self.src_file, el.loc.range())
+                                )
+                                .with_message(
+                                    format!("element is of type {}", el_t.to_string().fg(color1))
+                                )
+                                .with_color(color1)
+                            )
+                            .with_label(
+                                Label::new(
+                                    (&self.src_file, first_el_loc.range())
+                                )
+                                .with_message(
+                                    format!("element is of type {}", t.to_string().fg(color2))
+                                )
+                                .with_color(color2)
+                            )
+                            .with_note(
+                                "an array's elements must all be of the same type"
+                            )
+                            .finish()
+                            .print((&self.src_file, Source::from(self.src_content.clone())))
+                            .unwrap();
+
+                        self.errors.add(
+                            format!("element of array is type `{}`, but must be type `{}`", el_t, t),
+                            el.loc,
+                        );
+                    }
+                }
+                Type::Array(Box::new(WithLoc::no_loc(t)))
+            }
         }
     }
 }
@@ -1033,7 +1083,7 @@ pub fn type_of(e: &Expr) -> Type {
         Expr::BoolLit(_) => Bool,
         Expr::Var(WithLoc {
             elem: Var(_, t), ..
-        }) => *t,
+        }) => t.clone(),
         // TODO: Call needs global function type map
         // we're kind of not caring about type_of.
         Expr::Call(_, _) => Unit,
@@ -1055,6 +1105,8 @@ pub fn type_of(e: &Expr) -> Type {
         ) => Bool,
         Expr::UnOp(WithLoc { elem: Neg, .. }, _) => Int,
         Expr::UnOp(WithLoc { elem: Not, .. }, _) => Bool,
+        // TODO: fix? Also, do we need a type array initializer? [] is ambiguous otherwise
+        Expr::Array(WithLoc { elem: _, loc }) => Array(Box::new(WithLoc { elem: Int, loc: loc.clone() })),
     }
 }
 
@@ -1080,7 +1132,7 @@ impl VariableTypeContext {
     pub fn lookup(&self, s: &str) -> Option<Type> {
         for type_map in &self.0 {
             if type_map.contains_key(s) {
-                return Some(type_map[s]);
+                return Some(type_map[s].clone());
             }
         }
 

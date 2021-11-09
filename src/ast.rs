@@ -4,6 +4,7 @@
 use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::fmt::{Debug, Display, Formatter};
+use std::hash::Hash;
 use std::ops::{Deref, DerefMut};
 
 // TODO: change to loc_pre and loc_post, so we can use loc_post to say when something's missing,
@@ -51,6 +52,20 @@ impl<T: Debug + Clone> Borrow<T> for WithLoc<T> {
 impl<T: Clone + Debug + Display> Display for WithLoc<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Display::fmt(&self.elem, f)
+    }
+}
+
+impl<T: PartialEq + Clone + Debug> PartialEq for WithLoc<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.elem == other.elem
+    }
+}
+
+impl<T: PartialEq + Clone + Debug> Eq for WithLoc<T> {}
+
+impl<T: Hash + Clone + Debug> Hash for WithLoc<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.elem.hash(state);
     }
 }
 
@@ -218,6 +233,7 @@ pub enum Expr {
     Call(WithLoc<String>, WithLoc<Vec<WithLoc<Expr>>>),
     BinOp(WithLoc<BinOpcode>, Box<WithLoc<Expr>>, Box<WithLoc<Expr>>),
     UnOp(WithLoc<UnOpcode>, Box<WithLoc<Expr>>),
+    Array(WithLoc<Vec<WithLoc<Expr>>>),
     // Int(WithLoc<IntExpr>),
     // Bool(WithLoc<BoolExpr>),
 }
@@ -250,6 +266,10 @@ impl Expr {
                 left_fv
             }
             UnOp(_, inner) => inner.free_vars(),
+            Array(elems) => elems.elem.iter().fold(HashSet::new(), |mut acc, e| {
+                acc.extend(e.free_vars());
+                acc
+            }),
         }
     }
 
@@ -261,6 +281,7 @@ impl Expr {
             Expr::Call(_, args) => args.iter().any(|arg| arg.contains_bool_var()),
             Expr::BinOp(_, left, right) => left.contains_bool_var() || right.contains_bool_var(),
             Expr::UnOp(_, inner) => inner.contains_bool_var(),
+            Expr::Array(elems) => elems.iter().any(|e| e.contains_bool_var()),
         }
     }
 }
@@ -278,6 +299,7 @@ impl Display for Expr {
             }
             BinOp(op, left, right) => f.write_str(&format!("({} {} {})", left, op, right)),
             UnOp(op, inner) => f.write_str(&format!("{}{}", op, inner)),
+            Array(elems) => f.write_str(&format!("[{}]", sep_string_display(elems, ", "))),
         }
     }
 }
@@ -291,10 +313,10 @@ impl Display for Expr {
 //     Int_Int
 // }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpcodeType<P>(pub P, pub Type)
 where
-    P: Debug + Clone + Copy + PartialEq + Eq;
+    P: Debug + Clone + PartialEq + Eq;
 
 #[derive(Debug, Clone)]
 pub enum BinOpcode {
@@ -400,16 +422,17 @@ impl Display for UnOpcode {
 //     Binop(Box<BoolExpr>),
 // }
 
-// TODO: Add Unknown type that can be used during typechecking that just means "ignore me" and causes no cascading errors.
-// TODO: in this vein, also adjust TypeChecker to contain a Vec of errors and only at the end return an Err.
-// maybe add "_internal" variants for that that do not return Results, and a non-_internal wrapper that just calls _internal and then returns Err if self.errors is non-empty
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+// TODO: TC maybe add "_internal" variants for that that do not return Results, and a non-_internal wrapper that just calls _internal and then returns Err if self.errors is non-empty
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Type {
     Int,
     Bool,
     Unit,
     Unknown,
+    Array(Box<WithLoc<Type>>),
 }
+
+// impl Copy for Type {}
 
 impl Display for Type {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -418,6 +441,7 @@ impl Display for Type {
             Int => f.write_str("int"),
             Bool => f.write_str("bool"),
             Unit => f.write_str("unit"),
+            Array(inner) => f.write_str(&format!("[{}]", inner)),
             Unknown => f.write_str("_unknown_"),
         }
     }
@@ -435,8 +459,8 @@ impl Var {
         self.1 == Type::Int
     }
 
-    pub fn set_type(&mut self, t: Type) {
-        self.1 = t;
+    pub fn set_type(&mut self, t: &Type) {
+        self.1 = t.clone();
     }
 }
 
