@@ -163,7 +163,7 @@ impl<P: Borrow<Program>> From<P> for FuncTypeContext {
             .collect::<HashMap<_, _>>();
 
 
-
+        // TODO: maybe add "external" bool to value, then we can do better error reporting
         // Built-ins
         map.insert("print_int".to_string(), (
             WithLoc::no_loc("print_int".to_string()),
