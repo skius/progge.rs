@@ -1,0 +1,38 @@
+fn main(args: int) -> int {
+    if args < 3 {
+        args = 100;
+        let args = 0;
+        args = -100;
+    }
+    return takes_arg(args * 2);
+}
+
+fn takes_arg(x: int) -> int {
+    let x = x;
+    x = x + 1;
+    return x;
+}
+
+fn foo() {
+    return;
+}
+
+fn bar() -> int {
+    return 42;
+}
+
+fn baz(a: int, b: int) -> bool {
+    return a < b || a - b < a * b;
+}
+
+// Check if forwards-function-calls work
+fn forwards() -> int {
+    let x = backwards();
+    return x;
+}
+
+// Check if backwards-function-calls work
+fn backwards() -> int{
+    let x = forwards();
+    return x;
+}

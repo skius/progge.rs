@@ -154,13 +154,26 @@ pub struct FuncTypeContext(HashMap<String, (WithLoc<String>, WithLoc<Vec<Param>>
 
 impl<P: Borrow<Program>> From<P> for FuncTypeContext {
     fn from(p: P) -> Self {
-        let map = p
+        let mut map = p
             .borrow()
             .0
             .iter()
             .map(|fd| (&fd.name, (&fd.params, &fd.retty)))
             .map(|(name, (params, retty))| (name.elem.clone(), (name.clone(), params.clone(), retty.clone())))
             .collect::<HashMap<_, _>>();
+
+
+
+        // Built-ins
+        map.insert("print_int".to_string(), (
+            WithLoc::no_loc("print_int".to_string()),
+            WithLoc::no_loc(vec![(WithLoc::no_loc(Var("i".to_string(), Type::Int)), WithLoc::no_loc(Type::Int))]),
+            WithLoc::no_loc(Type::Int)));
+
+        map.insert("int_arg".to_string(), (
+            WithLoc::no_loc("int_arg".to_string()),
+            WithLoc::no_loc(vec![(WithLoc::no_loc(Var("i".to_string(), Type::Int)), WithLoc::no_loc(Type::Int))]),
+            WithLoc::no_loc(Type::Int)));
 
         FuncTypeContext(map)
     }

@@ -14,6 +14,20 @@ pub struct WithLoc<T: Debug + Clone> {
     pub loc: Loc,
 }
 
+impl<T: Debug + Clone> WithLoc<T> {
+    pub fn no_loc(elem: T) -> Self {
+        WithLoc {
+            elem,
+            loc: Loc {
+                line: 0,
+                col: 0,
+                start: 0,
+                end: 0,
+            },
+        }
+    }
+}
+
 impl<T: Debug + Clone> Deref for WithLoc<T> {
     type Target = T;
 
