@@ -858,7 +858,7 @@ impl TypeChecker {
     }
 
     pub fn tc_exp(&mut self, exp: &mut WithLoc<Expr>) -> Type {
-        match &mut exp.elem {
+        let t = match &mut exp.elem {
             Expr::IntLit(_) => Type::Int,
             Expr::BoolLit(_) => Type::Bool,
             Expr::Var(v) => {
@@ -1240,7 +1240,9 @@ impl TypeChecker {
 
                 elem_t
             }
-        }
+        };
+        exp.set_type(&t);
+        t
     }
 }
 
@@ -1290,7 +1292,7 @@ pub fn type_of(e: &Expr) -> Type {
         Expr::UnOp(WithLoc { elem: Neg, .. }, _) => Int,
         Expr::UnOp(WithLoc { elem: Not, .. }, _) => Bool,
         // TODO: fix? Also, do we need a type array initializer? [] is ambiguous otherwise
-        Expr::Array(WithLoc { elem: _, loc }) => Array(Box::new(WithLoc { elem: Int, loc: loc.clone() })),
+        Expr::Array(WithLoc { elem: _, loc, .. }) => Array(Box::new(WithLoc::new(Int, loc.clone()))),
         Expr::Index(arr, idx) => Unknown,
     }
 }

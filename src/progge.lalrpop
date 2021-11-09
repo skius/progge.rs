@@ -14,7 +14,7 @@ match {
 }
 
 WithLoc<T>: WithLoc<T> = {
-    <start:@L> <elem:T> <end:@R> => WithLoc { elem: elem, loc: loc_from_offset(src, start, end) },
+    <start:@L> <elem:T> <end:@R> => WithLoc::new(elem, loc_from_offset(src, start, end)),
 }
 
 Comma<T>: Vec<T> = {
@@ -57,7 +57,7 @@ pub FuncDef: FuncDef = {
         <body:BlockL>
     "}" CloseScope => FuncDef { name:name, params: params, retty: match retty {
         Some(retty) => retty,
-        None => WithLoc { elem: Type::Unit, loc: loc_from_offset(src, empty_retty_loc, empty_retty_loc) },
+        None => WithLoc::new(Type::Unit, loc_from_offset(src, empty_retty_loc, empty_retty_loc)),
     }, body: body },
 }
 
@@ -65,7 +65,7 @@ Param: (WithLoc<Var>, WithLoc<Type>) = {
     <name:NameL> ":" <typ:TypeL> => {
         let loc = name.loc;
         tctx.insert(name.elem.clone(), (*typ).clone());
-        (WithLoc { elem: Var(name.elem, typ.elem.clone()), loc: loc }, typ.clone())
+        (WithLoc::new(Var(name.elem, typ.elem.clone()), loc), typ.clone())
     },
 }
 
@@ -94,7 +94,7 @@ pub StmtBlock: Stmt = {
     OpenScope "if" <e:ExprL> "{"
         <if_b:BlockL>
     "}" <empty_else:@L> CloseScope => Stmt::IfElse { cond: e, if_branch: if_b, else_branch:
-        WithLoc { elem: Block(vec![]), loc: loc_from_offset(src, empty_else, empty_else) },
+        WithLoc::new(Block(vec![]), loc_from_offset(src, empty_else, empty_else)),
     },
     OpenScope "if" <e:ExprL> "{"
         <if_b:BlockL>
@@ -116,7 +116,7 @@ pub Stmt: Stmt = {
         let t = type_of(&e);
         let loc = n.loc;
         tctx.insert(n.elem.clone(), t.clone());
-        Stmt::Decl(WithLoc { elem: Var(n.elem, t.clone()), loc: loc}, e)
+        Stmt::Decl(WithLoc::new(Var(n.elem, t.clone()), loc), e)
     },
     <le:LocExprL> "=" <e:ExprL> => {
         Stmt::Assn(le, e)
@@ -127,7 +127,7 @@ LocExprL = WithLoc<LocExpr>;
 LocExpr: LocExpr = {
     <n:NameL> => {
         let var = Var(n.elem, Type::Unknown);
-        LocExpr::Var(WithLoc { elem: var, loc: n.loc})
+        LocExpr::Var(WithLoc::new(var, n.loc))
     },
     <arr:LeafExprL> "[" <idx:ExprL> "]" => {
         LocExpr::Index(arr, idx)
@@ -182,7 +182,7 @@ LeafExpr: Expr = {
             Type::Unit
         });
         let loc = n.loc;
-        Expr::Var(WithLoc { elem: Var(n.elem, t), loc: loc })
+        Expr::Var(WithLoc::new(Var(n.elem, t), loc))
     },
 //    <op:IUnOpL> <e:LeafExprL> => Expr::UnOp(op, Box::new(e)),
 //    <op:BUnOpL> <e:LeafExprL> => Expr::UnOp(op, Box::new(e)),

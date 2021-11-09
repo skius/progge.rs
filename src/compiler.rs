@@ -144,6 +144,17 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
                 // if we typecheck correctly and do not allow void functions to be in expression calls, then this will always work
                 call_res.try_as_basic_value().unwrap_left().into()
             }
+            // Expr::Array(els) => {
+            //     // TODO: Add type to WithLoc
+            //     let els = els.iter().map(|e| self.compile_exp(e)).collect::<Vec<_>>();
+            //     let array_type = self.context.i32_type().array_type(els.len() as u32);
+            //     let array_ptr = self.builder.build_alloca(array_type, "arraytmp");
+            //     for (i, el) in els.iter().enumerate() {
+            //         let el_ptr = self.builder.build_gep(array_ptr, &[self.context.i32_type().const_int(i as u64, false)], "elptr");
+            //         self.builder.build_store(el_ptr, el.into_pointer_value());
+            //     }
+            //     array_ptr.into()
+            // }
             e => panic!("Unsupported expression: {:?}", e)
         }
     }

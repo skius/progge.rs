@@ -13,6 +13,7 @@ use std::ops::{Deref, DerefMut};
 pub struct WithLoc<T: Debug + Clone> {
     pub elem: T,
     pub loc: Loc,
+    pub typ: Type,
 }
 
 impl<T: Debug + Clone> WithLoc<T> {
@@ -25,7 +26,16 @@ impl<T: Debug + Clone> WithLoc<T> {
                 start: 0,
                 end: 0,
             },
+            typ: Type::Unknown,
         }
+    }
+
+    pub fn new(elem: T, loc: Loc) -> Self {
+        WithLoc { elem, loc, typ: Type::Unknown }
+    }
+
+    pub fn set_type(&mut self, t: &Type) {
+        self.typ = t.clone();
     }
 }
 
