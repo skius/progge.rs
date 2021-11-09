@@ -8,7 +8,7 @@ use inkwell::types::{AnyType, BasicMetadataTypeEnum, BasicTypeEnum};
 use inkwell::values::{BasicValue, BasicMetadataValueEnum, FloatValue, IntValue, FunctionValue, PointerValue, BasicValueEnum, AnyValue, AnyValueEnum};
 use inkwell::{OptimizationLevel, FloatPredicate, IntPredicate};
 use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine};
-use crate::ast::{BinOpcode, Block, Expr, FuncDef, Program, Stmt, Type, UnOpcode, Var};
+use crate::ast::{BinOpcode, Block, Expr, FuncDef, LocExpr, Program, Stmt, Type, UnOpcode, Var};
 
 
 pub struct Compiler<'a, 'ctx> {
@@ -52,7 +52,7 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
         builder.build_alloca(self.context.i64_type(), name)
     }
 
-    fn compile_ty(&mut self, t: Type) -> BasicMetadataTypeEnum<'ctx> {
+    fn compile_ty(&mut self, t: &Type) -> BasicMetadataTypeEnum<'ctx> {
         match t {
             Type::Int => self.context.i64_type().into(),
             Type::Bool => self.context.bool_type().into(),
@@ -165,12 +165,17 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
 
                 self.variables.insert(v.elem.clone(), alloca);
             },
-            Stmt::Assn(v, e) => {
-                let val = self.compile_exp(e);
-                let var = self.variables.get(v).unwrap();
-                // TODO: If we add other types than Int/Bool, we will need to handle these .into_int_values() differently.
-                // currently everything works out, because bools are ints in LLVM
-                self.builder.build_store(*var, val.into_int_value());
+            Stmt::Assn(le, e) => {
+                match &le.elem {
+                    LocExpr::Var(v) => {
+                        let val = self.compile_exp(e);
+                        let var = self.variables.get(v).unwrap();
+                        // TODO: If we add other types than Int/Bool, we will need to handle these .into_int_values() differently.
+                        // currently everything works out, because bools are ints in LLVM
+                        self.builder.build_store(*var, val.into_int_value());
+                    }
+                    LocExpr::Index(_, _) => { todo!("handle index assns") }
+                }
             },
             Stmt::IfElse { cond, if_branch, else_branch } => {
                 let cond = self.compile_exp(cond).into_int_value();
@@ -238,7 +243,7 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
     fn compile_fndef(&mut self, f: &FuncDef) -> FunctionValue<'ctx> {
         let args_types = f.params.iter()
             .map(|(_, t)| {
-                self.compile_ty(**t)
+                self.compile_ty(t)
             })
             .collect::<Vec<BasicMetadataTypeEnum>>();
         let args_types = args_types.as_slice();
@@ -249,7 +254,7 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
         //     Type::Bool => self.context.bool_type().into(),
         //     _ => panic!("Unsupported type: {:?}", t)
         // };
-        let fn_type = match *f.retty {
+        let fn_type = match &*f.retty {
             Type::Unit => self.context.void_type().fn_type(args_types, false),
             Type::Int => self.context.i64_type().fn_type(args_types, false),
             Type::Bool => self.context.bool_type().fn_type(args_types, false),

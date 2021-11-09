@@ -42,10 +42,10 @@ impl ScopedTypeContext {
         })
     }
 
-    pub fn insert(self: &Rc<ScopedTypeContext>, s: String, t: Type) {
+    pub fn insert(self: &Rc<ScopedTypeContext>, s: String, t: &Type) {
         *self.var_counts.deref().borrow_mut().entry(s.clone()).or_insert(0) += 1;
         let count = *self.var_counts.deref().borrow().get(s.as_str()).unwrap();
-        self.var_type.borrow_mut().insert(s.clone(), t);
+        self.var_type.borrow_mut().insert(s.clone(), t.clone());
         // let depth = self.depth_of_var(s.as_str()).unwrap();
         // let name = if count != 1 {
         //     format!("{}_{}", s, count)
@@ -91,7 +91,7 @@ impl ScopedTypeContext {
         let mut curr = Some(self.clone());
 
         while let Some(ctx) = curr {
-            let entry = ctx.var_type.borrow().get(s).map(|t| *t);
+            let entry = ctx.var_type.borrow().get(s).map(|t| t.clone());
             if let Some(t) = entry {
                 return Some((t, ctx));
             }
@@ -380,7 +380,7 @@ impl TypeChecker {
         // self.open_scope();
 
         fdef.params.iter_mut().for_each(|param| {
-            param.0.set_type(*param.1);
+            param.0.set_type(&param.1);
 
             if let Some(entry) = seen_params.get(param.0.as_str()) {
                 let [color1, color2] = colors();
@@ -418,7 +418,7 @@ impl TypeChecker {
                 );
             } else {
                 seen_params.insert(param.0.to_string(), param.0.clone());
-                self.curr_s_ty_ctx.insert(param.0.to_string(), *param.1);
+                self.curr_s_ty_ctx.insert(param.0.to_string(), &param.1);
                 self.disambig_var(&mut param.0);
             }
         });
@@ -505,7 +505,7 @@ impl TypeChecker {
                     None => (Type::Unit, stmt.loc),
                 };
 
-                if retty != *retty_expected {
+                if retty != *retty_expected && retty != Type::Unknown {
                     let [color1, color2] = colors();
 
                     Report::build(ariadne::ReportKind::Error, &self.src_file, loc.start)
@@ -550,97 +550,209 @@ impl TypeChecker {
                 // let binding opens a new scope
                 self.open_scope();
 
-                self.curr_s_ty_ctx.insert(v.to_string(), t);
+                self.curr_s_ty_ctx.insert(v.to_string(), &t);
                 // println!("inserted: {}", t_exp);
                 self.disambig_var(&mut *v);
-                v.set_type(t);
+                v.set_type(&t);
                 None
             }
-            Stmt::Assn(v, e) => {
-                // println!("in assn: {}", stmt);
+            Stmt::Assn(le, e) => {
+                match &mut le.elem {
+                    LocExpr::Var(v) => {
+                        let t = self.tc_exp(e);
 
-                let t = self.tc_exp(e);
-                // println!("in assn: {}", &t_exp_res.clone().unwrap());
+                        let mut curr_ty = self.curr_s_ty_ctx.lookup(v.as_str());
+                        if curr_ty.is_none() {
+                            let [color1, color2] = colors();
 
-                let mut curr_ty = self.curr_s_ty_ctx.lookup(v.as_str());
-                if curr_ty.is_none() {
-                    let [color1, color2] = colors();
-
-                    Report::build(ariadne::ReportKind::Error, &self.src_file, v.loc.start)
-                        .with_message::<&str>("variable assigned to before declared")
-                        .with_label(
-                            Label::new(
-                                (&self.src_file, v.loc.range())
-                            )
-                                .with_message(
-                                    format!("variable {} assigned to before declared", v.elem.as_str().fg(color1))
+                            Report::build(ariadne::ReportKind::Error, &self.src_file, v.loc.start)
+                                .with_message::<&str>("variable assigned to before declared")
+                                .with_label(
+                                    Label::new(
+                                        (&self.src_file, v.loc.range())
+                                    )
+                                        .with_message(
+                                            format!("variable {} assigned to before declared", v.elem.as_str().fg(color1))
+                                        )
+                                        .with_color(color1)
                                 )
-                                .with_color(color1)
-                        )
-                        .with_note(
-                            format!(
-                                "variables must be introduced e.g. by a {}-statement prior to being assigned",
-                                "let".fg(color2)
-                            )
-                        )
-                        .finish()
-                        .print((&self.src_file, Source::from(self.src_content.clone())))
-                        .unwrap();
-
-                    self.errors.add(
-                        format!("variable `{}` is assigned to before declared", v),
-                        stmt.loc,
-                    );
-
-                    // To allow further type checking, we just pretend the variable has been declared with the type returned by tc_exp
-                    curr_ty = Some(t);
-                    self.curr_s_ty_ctx.insert(v.to_string(), t);
-                }
-
-                let curr_ty = curr_ty.unwrap();
-
-
-
-                // To allow continuing type checking, we set the type to the possibly incorrect expression's type
-                // Actually this doesn't do much, since we don't update curr_s_ty_ctx.
-                // v.set_type(t);
-
-                if t != curr_ty && t != Type::Unknown {
-                    let [color_var, color1, color2] = colors();
-
-                    Report::build(ariadne::ReportKind::Error, &self.src_file, e.loc.start)
-                        .with_message::<&str>("variable assignment type mismatch")
-                        .with_label(
-                            Label::new(
-                                (&self.src_file, e.loc.range())
-                            )
-                                .with_message(
+                                .with_note(
                                     format!(
-                                        "assigned expression of type {}, but variable {} is of type {}",
-                                        t.fg(color2),
-                                        v.elem.as_str().fg(color_var),
-                                        curr_ty.fg(color1),
+                                        "variables must be introduced e.g. by a {}-statement prior to being assigned",
+                                        "let".fg(color2)
                                     )
                                 )
-                                .with_color(color2)
-                        )
-                        .with_note(
-                            format!(
-                                "variables must always be assigned their type"
-                            )
-                        )
-                        .finish()
-                        .print((&self.src_file, Source::from(self.src_content.clone())))
-                        .unwrap();
+                                .finish()
+                                .print((&self.src_file, Source::from(self.src_content.clone())))
+                                .unwrap();
 
-                    self.errors.add(
-                        format!("type `{}` of expression doesn't match type `{}` of variable `{}`", t, curr_ty, v),
-                        e.loc,
-                    );
+                            self.errors.add(
+                                format!("variable `{}` is assigned to before declared", v),
+                                stmt.loc,
+                            );
+
+                            // To allow further type checking, we just pretend the variable has been declared with the type returned by tc_exp
+                            self.curr_s_ty_ctx.insert(v.to_string(), &t);
+                            curr_ty = Some(t.clone());
+                        }
+
+                        let curr_ty = curr_ty.unwrap();
+
+
+
+                        // To allow continuing type checking, we set the type to the possibly incorrect expression's type
+                        // Actually this doesn't do much, since we don't update curr_s_ty_ctx.
+                        // v.set_type(t);
+
+                        if t != curr_ty && t != Type::Unknown {
+                            let [color_var, color1, color2] = colors();
+
+                            Report::build(ariadne::ReportKind::Error, &self.src_file, e.loc.start)
+                                .with_message::<&str>("variable assignment type mismatch")
+                                .with_label(
+                                    Label::new(
+                                        (&self.src_file, e.loc.range())
+                                    )
+                                        .with_message(
+                                            format!(
+                                                "assigned expression of type {}, but variable {} is of type {}",
+                                                (&t).fg(color2),
+                                                v.elem.as_str().fg(color_var),
+                                                (&curr_ty).fg(color1),
+                                            )
+                                        )
+                                        .with_color(color2)
+                                )
+                                .with_note(
+                                    format!(
+                                        "variables must always be assigned their type"
+                                    )
+                                )
+                                .finish()
+                                .print((&self.src_file, Source::from(self.src_content.clone())))
+                                .unwrap();
+
+                            self.errors.add(
+                                format!("type `{}` of expression doesn't match type `{}` of variable `{}`", &t, &curr_ty, v),
+                                e.loc,
+                            );
+                        }
+
+                        self.disambig_var(&mut *v);
+                        None
+                    }
+                    LocExpr::Index(arr, idx) => {
+                        let arr_t = self.tc_exp(arr);
+                        let idx_t = self.tc_exp(idx);
+                        let assn_t = self.tc_exp(e);
+
+                        // arr_t must be an array
+                        let elem_t = match arr_t {
+                            Type::Array(el_t) => {
+                                el_t.elem.clone()
+                            }
+                            Type::Unknown => {
+                                arr_t
+                            }
+                            t => {
+                                let [color1, color2] = colors();
+
+                                self.report("index into non-array", arr.loc.start)
+                                    .with_label(
+                                        Label::new(
+                                            (&self.src_file, arr.loc.range())
+                                        )
+                                            .with_message(
+                                                format!("base operand of {} is of type {}", "[]".fg(color1), t.to_string().fg(color2))
+                                            )
+                                            .with_color(color2)
+                                    )
+                                    .with_note(
+                                        "only arrays can be indexed"
+                                    )
+                                    .finish()
+                                    .print((&self.src_file, Source::from(self.src_content.clone())))
+                                    .unwrap();
+
+                                self.errors.add(
+                                    format!("operand of `[]` is type `{}`, but must be an array", t),
+                                    arr.loc,
+                                );
+
+                                Type::Unknown
+                            }
+                        };
+
+                        if idx_t != Type::Int && idx_t != Type::Unknown {
+                            let [color1, color2] = colors();
+
+                            self.report("index type mismatch", idx.loc.start)
+                                .with_label(
+                                    Label::new(
+                                        (&self.src_file, idx.loc.range())
+                                    )
+                                        .with_message(
+                                            format!("index is of type {}", idx_t.to_string().fg(color2))
+                                        )
+                                        .with_color(color2)
+                                )
+                                .with_note(
+                                    format!(
+                                        "array indices must be {}s",
+                                        "int".fg(color1),
+                                    )
+                                )
+                                .finish()
+                                .print((&self.src_file, Source::from(self.src_content.clone())))
+                                .unwrap();
+
+                            self.errors.add(
+                                format!("index of array is of type `{}`, but must be an int", idx_t),
+                                idx.loc,
+                            );
+                        }
+
+                        if assn_t != elem_t && assn_t != Type::Unknown {
+                            let [color1, color2] = colors();
+
+                            self.report("index assignment type mismatch", e.loc.start)
+                                .with_label(
+                                    Label::new(
+                                        (&self.src_file, e.loc.range())
+                                    )
+                                    .with_message(
+                                        format!("assigned expression is of type {}", assn_t.to_string().fg(color1))
+                                    )
+                                    .with_color(color1)
+                                )
+                                .with_label(
+                                    Label::new(
+                                        (&self.src_file, arr.loc.range())
+                                    )
+                                    .with_message(
+                                        format!("index into array of {}", elem_t.to_string().fg(color2))
+                                    )
+                                    .with_color(color2)
+                                )
+                                .with_note(
+                                    format!(
+                                        "assigned expressions must match the array's type",
+                                    )
+                                )
+                                .finish()
+                                .print((&self.src_file, Source::from(self.src_content.clone())))
+                                .unwrap();
+
+                            self.errors.add(
+                                format!("assignment of type `{}` to array of `{}`s", assn_t, elem_t),
+                                e.loc,
+                            );
+                        }
+
+                        None
+                    }
                 }
 
-                self.disambig_var(&mut *v);
-                None
             }
             Stmt::IfElse {
                 cond,
@@ -784,12 +896,12 @@ impl TypeChecker {
                             v.loc,
                         );
                         // to avoid a second "used before declared" error
-                        self.curr_s_ty_ctx.insert(v.to_string(), Type::Unknown);
+                        self.curr_s_ty_ctx.insert(v.to_string(), &Type::Unknown);
                         Type::Unknown
                     },
                     Some(t) => {
                         self.disambig_var(&mut *v);
-                        v.set_type(t);
+                        v.set_type(&t);
                         t
                     },
                 }
@@ -797,7 +909,7 @@ impl TypeChecker {
             Expr::Call(name, args) => {
                 // TODO: Typecheck that function exists
                 let (_, param_tys, retty) = &self.f_ty_ctx[name.as_str()];
-                let retty = **retty;
+                let retty = (**retty).clone();
 
                 let params_len = param_tys.len();
                 let args_len = args.len();
@@ -1006,6 +1118,128 @@ impl TypeChecker {
 
                 op_type.1
             }
+            Expr::Array(els) => {
+                let mut t = Type::Unknown;
+                let mut first_el_loc = Loc {
+                    start: 0,
+                    end: 0,
+                    col: 0,
+                    line: 0,
+                };
+                for el in els.iter_mut() {
+                    let el_t = self.tc_exp(el);
+                    if t == Type::Unknown {
+                        t = el_t;
+                        first_el_loc = el.loc.clone();
+                    } else if t != el_t {
+                        let [color1, color2] = colors();
+
+                        self.report("array element type mismatch", el.loc.start)
+                            .with_label(
+                                Label::new(
+                                    (&self.src_file, el.loc.range())
+                                )
+                                .with_message(
+                                    format!("element is of type {}", el_t.to_string().fg(color1))
+                                )
+                                .with_color(color1)
+                            )
+                            .with_label(
+                                Label::new(
+                                    (&self.src_file, first_el_loc.range())
+                                )
+                                .with_message(
+                                    format!("element is of type {}", t.to_string().fg(color2))
+                                )
+                                .with_color(color2)
+                            )
+                            .with_note(
+                                "an array's elements must all be of the same type"
+                            )
+                            .finish()
+                            .print((&self.src_file, Source::from(self.src_content.clone())))
+                            .unwrap();
+
+                        self.errors.add(
+                            format!("element of array is type `{}`, but must be type `{}`", el_t, t),
+                            el.loc,
+                        );
+                    }
+                }
+                Type::Array(Box::new(WithLoc::no_loc(t)))
+            }
+            Expr::Index(arr, idx) => {
+                let arr_t = self.tc_exp(arr);
+                let idx_t = self.tc_exp(idx);
+
+                // arr_t must be an array
+                let elem_t = match arr_t {
+                    Type::Array(el_t) => {
+                        el_t.elem.clone()
+                    }
+                    Type::Unknown => {
+                        arr_t
+                    }
+                    t => {
+                        let [color1, color2] = colors();
+
+                        self.report("index into non-array", arr.loc.start)
+                            .with_label(
+                                Label::new(
+                                    (&self.src_file, arr.loc.range())
+                                )
+                                .with_message(
+                                    format!("base operand of {} is of type {}", "[]".fg(color1), t.to_string().fg(color2))
+                                )
+                                .with_color(color2)
+                            )
+                            .with_note(
+                                "only arrays can be indexed"
+                            )
+                            .finish()
+                            .print((&self.src_file, Source::from(self.src_content.clone())))
+                            .unwrap();
+
+                        self.errors.add(
+                            format!("operand of `[]` is type `{}`, but must be an array", t),
+                            arr.loc,
+                        );
+
+                        Type::Unknown
+                    }
+                };
+
+                if idx_t != Type::Int && idx_t != Type::Unknown {
+                    let [color1, color2] = colors();
+
+                    self.report("index type mismatch", idx.loc.start)
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, idx.loc.range())
+                            )
+                            .with_message(
+                                format!("index is of type {}", idx_t.to_string().fg(color2))
+                            )
+                            .with_color(color2)
+                        )
+                        .with_note(
+                            format!(
+                                "array indices must be {}s",
+                                "int".fg(color1),
+                            )
+                        )
+                        .finish()
+                        .print((&self.src_file, Source::from(self.src_content.clone())))
+                        .unwrap();
+
+                    self.errors.add(
+                        format!("index of array is of type `{}`, but must be an int", idx_t),
+                        idx.loc,
+                    );
+                }
+
+                elem_t
+            }
         }
     }
 }
@@ -1033,7 +1267,7 @@ pub fn type_of(e: &Expr) -> Type {
         Expr::BoolLit(_) => Bool,
         Expr::Var(WithLoc {
             elem: Var(_, t), ..
-        }) => *t,
+        }) => t.clone(),
         // TODO: Call needs global function type map
         // we're kind of not caring about type_of.
         Expr::Call(_, _) => Unit,
@@ -1055,6 +1289,9 @@ pub fn type_of(e: &Expr) -> Type {
         ) => Bool,
         Expr::UnOp(WithLoc { elem: Neg, .. }, _) => Int,
         Expr::UnOp(WithLoc { elem: Not, .. }, _) => Bool,
+        // TODO: fix? Also, do we need a type array initializer? [] is ambiguous otherwise
+        Expr::Array(WithLoc { elem: _, loc }) => Array(Box::new(WithLoc { elem: Int, loc: loc.clone() })),
+        Expr::Index(arr, idx) => Unknown,
     }
 }
 
@@ -1080,7 +1317,7 @@ impl VariableTypeContext {
     pub fn lookup(&self, s: &str) -> Option<Type> {
         for type_map in &self.0 {
             if type_map.contains_key(s) {
-                return Some(type_map[s]);
+                return Some(type_map[s].clone());
             }
         }
 

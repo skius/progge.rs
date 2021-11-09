@@ -9,9 +9,10 @@ use petgraph::prelude::Dfs;
 use petgraph::visit::EdgeRef;
 use petgraph::Direction::{Incoming, Outgoing};
 
-use crate::ast::BinOpcode;
-use crate::ast::{Expr, UnOpcode, WithLoc};
+use crate::ast::{BinOpcode, Type, Var};
+use crate::ast::{LocExpr, Expr, UnOpcode, WithLoc};
 use crate::ir::{IREdge, IRNode, IntraProcCFG};
+use crate::ir::IRNode::IRReturn;
 
 // TODO: to counteract bool_vars causing imprecisions, add (optional) preprocessing step
 // that tries to inline all uses of bool vars. needs other static analyses first
@@ -34,6 +35,14 @@ impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
             if !self.state_map[&edge.id()].is_bottom(&self.man) {
                 let mut vars = self.env.keys().map(|v| v.as_str()).collect::<Vec<_>>();
                 vars.sort();
+                let src = self.cfg.graph.edge_endpoints(edge.id()).unwrap().0;
+                if let IRReturn(_) = self.cfg.graph[src] {
+                    // ignore
+                } else {
+                    // if we're not an outgoing edge of a return statement, don't print @RETURN@
+                    // which is always index 0
+                    vars.remove(0);
+                }
                 for v in vars {
                     intervals += &format!(
                         "{}: {:?}\\n",
@@ -119,6 +128,8 @@ impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
 //     format!("{}", dot)
 // }
 
+pub static RETURN_VAR: &'static str = "@RETURN@";
+
 fn env_from_cfg(cfg: &IntraProcCFG) -> Environment {
     let graph = &cfg.graph;
     let entry = cfg.entry;
@@ -137,6 +148,7 @@ fn env_from_cfg(cfg: &IntraProcCFG) -> Environment {
         .map(|v| v.0)
         .collect::<Vec<_>>();
     free_vars.sort();
+    free_vars.push(RETURN_VAR.to_string());
     // println!("{:?}", free_vars);
     Environment::new(free_vars)
 }
@@ -274,6 +286,17 @@ fn handle_irnode<M: Manager>(
         // "true" constraint
         IRTestcase | IRUnreachable | IRSkip | IRBranch => None,
         IRDecl(v, e) => {
+            if !v.is_int() {
+                // Only handling ints so far
+                // TODO: adjust for arrays
+                return None;
+            }
+
+            let texpr = int_expr_to_texpr(env, e);
+            state.assign(man, env, v.as_str(), &texpr);
+            None
+        }
+        IRAssn(LocExpr::Var(v), e) => {
             if v.is_bool() {
                 // Not handling boolean variables
                 return None;
@@ -283,27 +306,27 @@ fn handle_irnode<M: Manager>(
             state.assign(man, env, v.as_str(), &texpr);
             None
         }
-        IRAssn(v, e) => {
-            if v.is_bool() {
-                // Not handling boolean variables
-                return None;
-            }
-
-            let texpr = int_expr_to_texpr(env, e);
-            state.assign(man, env, v.as_str(), &texpr);
+        IRAssn(LocExpr::Index(_, _), _) => {
+            // TODO: handle arrays in AI
             None
         }
-        IRReturn(_e) => {
+        IRReturn(Some(e)) => {
             // TODO: Handle return better. How?
-
+            // TODO: make this not panic if retty not int. need to track return type of analyzed function
+            let v = Var(RETURN_VAR.to_string(), Type::Int);
+            handle_irnode(man, env, &IRAssn(LocExpr::Var(WithLoc::no_loc(v)), e.clone()), state)
+        }
+        IRReturn(None) => {
+            // unhandled
             None
         }
         IRCBranch(cond) => {
             // We don't analyze boolean variables currently, so we overapproximate
-            if cond.contains_bool_var() {
-                let taken = state.clone();
-                return Some(taken);
-            }
+            // if cond.contains_bool_var() {
+            //     let taken = state.clone();
+            //     return Some(taken);
+            // }
+            // Handling this now via Hcons::Top
 
             let hcons = bool_expr_to_hcons(env, cond);
             let mut taken = state.clone();
@@ -322,10 +345,12 @@ fn bool_expr_to_hcons(env: &Environment, expr: &Expr) -> Hcons {
         IntLit(_) => panic!("IntLit is not a bool_expr. Type-checking should have caught this"),
         BoolLit(true) => Texpr::int(0).lt(Texpr::int(1)).into(),
         BoolLit(false) => Texpr::int(0).lt(Texpr::int(0)).into(),
-        Var(_) => panic!("bool variables are unsupported at the moment"),
+        // Var(_) => panic!("bool variables are unsupported at the moment"),
+        Var(_) => Hcons::Top,
         // TODO: make call just go to top by default, and maybe a second run where it utilizes
         // a previous run's AI results.
-        Call(_, _) => panic!("calls are unsupported at the moment"),
+        // Call(_, _) => panic!("calls are unsupported at the moment"),
+        Call(_, _) => Hcons::Top,
         BinOp(WithLoc { elem: op, .. }, left, right) => {
             // op must be int * int -> bool
             // or bool * bool -> bool
@@ -380,6 +405,8 @@ fn bool_expr_to_hcons(env: &Environment, expr: &Expr) -> Hcons {
             }
             _ => panic!("arithmetic unop in a bool expr"),
         },
+        Index(_, _) => Hcons::Top,
+        e => panic!("unsupported expr: {:?}", e),
     }
 }
 
@@ -389,7 +416,8 @@ fn int_expr_to_texpr(env: &Environment, expr: &Expr) -> Texpr {
     match expr {
         IntLit(i) => Texpr::int(*i),
         Var(v) => Texpr::var(env, v.as_str()),
-        c@Call(_, _) => panic!("conversion of calls to texpr not supported yet {}", c),
+        // c@Call(_, _) => panic!("conversion of calls to texpr not supported yet {}", c),
+        Call(_, _) => Texpr::top(),
         BinOp(WithLoc { elem: op, .. }, left, right) => {
             Texpr::binop(
                 int_binop_to_texpr_binop(op),
@@ -403,6 +431,7 @@ fn int_expr_to_texpr(env: &Environment, expr: &Expr) -> Texpr {
                 int_expr_to_texpr(env, inner)
             )
         }
+        Index(_, _) => Texpr::top(),
         e =>
             panic!("int_expr_to_texpr: encountered unhandled case (probably unsupported boolean expression): {}", e),
     }

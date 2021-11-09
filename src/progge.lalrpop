@@ -39,6 +39,7 @@ pub Program: Program = {
 }
 
 // These two non-terminals only exist for their side-effects
+// TODO: consider getting rid of this parse-time type-checking completely
 OpenScope: () = {
     => {
         tctx.new_scope();
@@ -63,8 +64,8 @@ pub FuncDef: FuncDef = {
 Param: (WithLoc<Var>, WithLoc<Type>) = {
     <name:NameL> ":" <typ:TypeL> => {
         let loc = name.loc;
-        tctx.insert(name.elem.clone(), *typ);
-        (WithLoc { elem: Var(name.elem, *typ), loc: loc }, typ)
+        tctx.insert(name.elem.clone(), (*typ).clone());
+        (WithLoc { elem: Var(name.elem, typ.elem.clone()), loc: loc }, typ.clone())
     },
 }
 
@@ -114,13 +115,22 @@ pub Stmt: Stmt = {
     "let" <n:NameL> "=" <e:ExprL> => {
         let t = type_of(&e);
         let loc = n.loc;
-        tctx.insert(n.elem.clone(), t);
-        Stmt::Decl(WithLoc { elem: Var(n.elem, t), loc: loc}, e)
+        tctx.insert(n.elem.clone(), t.clone());
+        Stmt::Decl(WithLoc { elem: Var(n.elem, t.clone()), loc: loc}, e)
     },
-    <n:NameL> "=" <e:ExprL> => {
-        let t = type_of(&e);
-        let loc = n.loc;
-        Stmt::Assn(WithLoc { elem: Var(n.elem, t), loc: loc}, e)
+    <le:LocExprL> "=" <e:ExprL> => {
+        Stmt::Assn(le, e)
+    },
+}
+
+LocExprL = WithLoc<LocExpr>;
+LocExpr: LocExpr = {
+    <n:NameL> => {
+        let var = Var(n.elem, Type::Unknown);
+        LocExpr::Var(WithLoc { elem: var, loc: n.loc})
+    },
+    <arr:LeafExprL> "[" <idx:ExprL> "]" => {
+        LocExpr::Index(arr, idx)
     },
 }
 
@@ -146,7 +156,14 @@ BExpr3 = TierL<RopcodeL, IExpr0>;
 IExpr0 = TierL<IExpr0OpL, IExpr1>;
 // * % /
 //IExpr1L = WithLoc<IExpr1>;
-IExpr1 = TierL<IExpr1OpL, LeafExpr>;
+IExpr1 = TierL<IExpr1OpL, UnExpr>;
+
+UnExprL = WithLoc<UnExpr>;
+UnExpr: Expr = {
+    <op:IUnOpL> <e:UnExprL> => Expr::UnOp(op, Box::new(e)),
+    <op:BUnOpL> <e:UnExprL> => Expr::UnOp(op, Box::new(e)),
+    LeafExpr,
+}
 
 LeafExprL = WithLoc<LeafExpr>;
 LeafExpr: Expr = {
@@ -154,6 +171,8 @@ LeafExpr: Expr = {
     "true" => Expr::BoolLit(true),
     "false" => Expr::BoolLit(false),
     <n:NameL> "(" <args:WithLoc<Comma<ExprL>>> ")" => Expr::Call(n, args),
+    "[" <elems:WithLoc<Comma<ExprL>>> "]" => Expr::Array(elems),
+    <arr:LeafExprL> "[" <idx:ExprL> "]" => Expr::Index(Box::new(arr), Box::new(idx)),
     <n:NameL> => {
  // TODO: instead of panicking, I could use a placeholder type here to complete the parse
         let t = tctx.lookup(&n).unwrap_or_else(|| {
@@ -165,8 +184,8 @@ LeafExpr: Expr = {
         let loc = n.loc;
         Expr::Var(WithLoc { elem: Var(n.elem, t), loc: loc })
     },
-    <op:IUnOpL> <e:LeafExprL> => Expr::UnOp(op, Box::new(e)),
-    <op:BUnOpL> <e:LeafExprL> => Expr::UnOp(op, Box::new(e)),
+//    <op:IUnOpL> <e:LeafExprL> => Expr::UnOp(op, Box::new(e)),
+//    <op:BUnOpL> <e:LeafExprL> => Expr::UnOp(op, Box::new(e)),
     "(" <BExpr0> ")" => <>,
 
 }
@@ -223,6 +242,8 @@ Type: Type = {
     "int" => Type::Int,
     "bool" => Type::Bool,
     "unit" => Type::Unit,
+    "[" <t:TypeL> "]" => Type::Array(Box::new(t)),
+
 }
 
 //VarL: WithLoc<Var> = {
