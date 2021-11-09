@@ -475,13 +475,40 @@ impl Display for UnOpcode {
 // }
 
 // TODO: TC maybe add "_internal" variants for that that do not return Results, and a non-_internal wrapper that just calls _internal and then returns Err if self.errors is non-empty
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq)]
 pub enum Type {
     Int,
     Bool,
     Unit,
     Unknown,
     Array(Box<WithLoc<Type>>),
+}
+
+// To ignore the "loc" part of the type
+impl Hash for Type {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        use Type::*;
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Array(t) => t.elem.hash(state),
+            _ => {}
+        }
+    }
+}
+
+impl PartialEq for Type {
+    fn eq(&self, other: &Self) -> bool {
+        use Type::*;
+
+        match (self, other) {
+            (Int, Int) => true,
+            (Bool, Bool) => true,
+            (Unit, Unit) => true,
+            (Unknown, Unknown) => true,
+            (Array(t1), Array(t2)) => t1.elem == t2.elem,
+            _ => false,
+        }
+    }
 }
 
 // impl Copy for Type {}
