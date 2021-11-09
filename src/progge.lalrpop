@@ -118,10 +118,19 @@ pub Stmt: Stmt = {
         tctx.insert(n.elem.clone(), t.clone());
         Stmt::Decl(WithLoc { elem: Var(n.elem, t.clone()), loc: loc}, e)
     },
-    <n:NameL> "=" <e:ExprL> => {
-        let t = type_of(&e);
-        let loc = n.loc;
-        Stmt::Assn(WithLoc { elem: Var(n.elem, t), loc: loc}, e)
+    <le:LocExprL> "=" <e:ExprL> => {
+        Stmt::Assn(le, e)
+    },
+}
+
+LocExprL = WithLoc<LocExpr>;
+LocExpr: LocExpr = {
+    <n:NameL> => {
+        let var = Var(n.elem, Type::Unknown);
+        LocExpr::Var(WithLoc { elem: var, loc: n.loc})
+    },
+    <arr:LeafExprL> "[" <idx:ExprL> "]" => {
+        LocExpr::Index(arr, idx)
     },
 }
 

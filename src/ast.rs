@@ -175,7 +175,7 @@ pub enum Stmt {
     Unreachable(),
     Return(Option<WithLoc<Expr>>),
     Decl(WithLoc<Var>, WithLoc<Expr>),
-    Assn(WithLoc<Var>, WithLoc<Expr>),
+    Assn(WithLoc<LocExpr>, WithLoc<Expr>),
     IfElse {
         cond: WithLoc<Expr>,
         if_branch: WithLoc<Block>,
@@ -222,6 +222,45 @@ impl Display for Stmt {
     }
 }
 
+// this represents an "lvalue", i.e. whatever can be assigned to
+#[derive(Debug, Clone)]
+pub enum LocExpr {
+    Var(WithLoc<Var>),
+    Index(WithLoc<Expr>, WithLoc<Expr>),
+}
+
+impl LocExpr {
+    pub fn free_vars(&self) -> HashSet<Var> {
+        use LocExpr::*;
+
+        match self {
+            Var(v) => {
+                let mut fv = HashSet::new();
+                fv.insert(v.elem.clone());
+                fv
+            }
+            Index(arr, idx) => {
+                let mut fv = arr.free_vars();
+                fv.extend(idx.free_vars());
+                fv
+            }
+        }
+    }
+}
+
+impl Display for LocExpr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        use LocExpr::*;
+
+        match self {
+            Var(v) => Display::fmt(v, f),
+            // TODO: risky that we're leaving out () around `arr`, but works because currently arr can only be a leaf expr
+            Index(arr, idx) => f.write_str(&format!("{}[{}]", arr, idx)),
+        }
+    }
+}
+
+
 // TODO: how to handle Calls? they may be either Bool or Int expressions
 // TODO: same for Variables...
 // decided: no types in rust representation
@@ -234,6 +273,10 @@ pub enum Expr {
     BinOp(WithLoc<BinOpcode>, Box<WithLoc<Expr>>, Box<WithLoc<Expr>>),
     UnOp(WithLoc<UnOpcode>, Box<WithLoc<Expr>>),
     Array(WithLoc<Vec<WithLoc<Expr>>>),
+    // DefaultArray {
+    //     default_value: Box<WithLoc<Expr>>,
+    //     size: Box<WithLoc<Expr>>,
+    // },
     Index(Box<WithLoc<Expr>>, Box<WithLoc<Expr>>),
     // Int(WithLoc<IntExpr>),
     // Bool(WithLoc<BoolExpr>),

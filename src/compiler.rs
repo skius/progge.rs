@@ -8,7 +8,7 @@ use inkwell::types::{AnyType, BasicMetadataTypeEnum, BasicTypeEnum};
 use inkwell::values::{BasicValue, BasicMetadataValueEnum, FloatValue, IntValue, FunctionValue, PointerValue, BasicValueEnum, AnyValue, AnyValueEnum};
 use inkwell::{OptimizationLevel, FloatPredicate, IntPredicate};
 use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine};
-use crate::ast::{BinOpcode, Block, Expr, FuncDef, Program, Stmt, Type, UnOpcode, Var};
+use crate::ast::{BinOpcode, Block, Expr, FuncDef, LocExpr, Program, Stmt, Type, UnOpcode, Var};
 
 
 pub struct Compiler<'a, 'ctx> {
@@ -165,12 +165,17 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
 
                 self.variables.insert(v.elem.clone(), alloca);
             },
-            Stmt::Assn(v, e) => {
-                let val = self.compile_exp(e);
-                let var = self.variables.get(v).unwrap();
-                // TODO: If we add other types than Int/Bool, we will need to handle these .into_int_values() differently.
-                // currently everything works out, because bools are ints in LLVM
-                self.builder.build_store(*var, val.into_int_value());
+            Stmt::Assn(le, e) => {
+                match &le.elem {
+                    LocExpr::Var(v) => {
+                        let val = self.compile_exp(e);
+                        let var = self.variables.get(v).unwrap();
+                        // TODO: If we add other types than Int/Bool, we will need to handle these .into_int_values() differently.
+                        // currently everything works out, because bools are ints in LLVM
+                        self.builder.build_store(*var, val.into_int_value());
+                    }
+                    LocExpr::Index(_, _) => { todo!("handle index assns") }
+                }
             },
             Stmt::IfElse { cond, if_branch, else_branch } => {
                 let cond = self.compile_exp(cond).into_int_value();

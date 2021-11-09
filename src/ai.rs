@@ -10,7 +10,7 @@ use petgraph::visit::EdgeRef;
 use petgraph::Direction::{Incoming, Outgoing};
 
 use crate::ast::{BinOpcode, Type, Var};
-use crate::ast::{Expr, UnOpcode, WithLoc};
+use crate::ast::{LocExpr, Expr, UnOpcode, WithLoc};
 use crate::ir::{IREdge, IRNode, IntraProcCFG};
 use crate::ir::IRNode::IRReturn;
 
@@ -128,7 +128,7 @@ impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
 //     format!("{}", dot)
 // }
 
-static RETURN_VAR: &'static str = "@RETURN@";
+pub static RETURN_VAR: &'static str = "@RETURN@";
 
 fn env_from_cfg(cfg: &IntraProcCFG) -> Environment {
     let graph = &cfg.graph;
@@ -296,7 +296,7 @@ fn handle_irnode<M: Manager>(
             state.assign(man, env, v.as_str(), &texpr);
             None
         }
-        IRAssn(v, e) => {
+        IRAssn(LocExpr::Var(v), e) => {
             if v.is_bool() {
                 // Not handling boolean variables
                 return None;
@@ -306,11 +306,15 @@ fn handle_irnode<M: Manager>(
             state.assign(man, env, v.as_str(), &texpr);
             None
         }
+        IRAssn(LocExpr::Index(_, _), _) => {
+            // TODO: handle arrays in AI
+            None
+        }
         IRReturn(Some(e)) => {
             // TODO: Handle return better. How?
-
-            // this panics if e is not an int expression
-            handle_irnode(man, env, &IRAssn(Var(RETURN_VAR.to_string(), Type::Int), e.clone()), state)
+            // TODO: make this not panic if retty not int. need to track return type of analyzed function
+            let v = Var(RETURN_VAR.to_string(), Type::Int);
+            handle_irnode(man, env, &IRAssn(LocExpr::Var(WithLoc::no_loc(v)), e.clone()), state)
         }
         IRReturn(None) => {
             // unhandled
