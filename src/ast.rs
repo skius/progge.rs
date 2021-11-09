@@ -4,7 +4,7 @@
 use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::fmt::{Debug, Display, Formatter};
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 
 // TODO: change to loc_pre and loc_post, so we can use loc_post to say when something's missing,
@@ -499,8 +499,20 @@ impl Display for Type {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq)]
 pub struct Var(pub String, pub Type);
+
+impl Hash for Var {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl PartialEq for Var {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
 
 impl Var {
     pub fn is_bool(&self) -> bool {
