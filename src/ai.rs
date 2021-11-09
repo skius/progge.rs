@@ -274,8 +274,9 @@ fn handle_irnode<M: Manager>(
         // "true" constraint
         IRTestcase | IRUnreachable | IRSkip | IRBranch => None,
         IRDecl(v, e) => {
-            if v.is_bool() {
-                // Not handling boolean variables
+            if !v.is_int() {
+                // Only handling ints so far
+                // TODO: adjust for arrays
                 return None;
             }
 
@@ -383,6 +384,7 @@ fn bool_expr_to_hcons(env: &Environment, expr: &Expr) -> Hcons {
             }
             _ => panic!("arithmetic unop in a bool expr"),
         },
+        Index(_, _) => Hcons::Top,
         e => panic!("unsupported expr: {:?}", e),
     }
 }
@@ -408,6 +410,7 @@ fn int_expr_to_texpr(env: &Environment, expr: &Expr) -> Texpr {
                 int_expr_to_texpr(env, inner)
             )
         }
+        Index(_, _) => Texpr::top(),
         e =>
             panic!("int_expr_to_texpr: encountered unhandled case (probably unsupported boolean expression): {}", e),
     }

@@ -234,6 +234,7 @@ pub enum Expr {
     BinOp(WithLoc<BinOpcode>, Box<WithLoc<Expr>>, Box<WithLoc<Expr>>),
     UnOp(WithLoc<UnOpcode>, Box<WithLoc<Expr>>),
     Array(WithLoc<Vec<WithLoc<Expr>>>),
+    Index(Box<WithLoc<Expr>>, Box<WithLoc<Expr>>),
     // Int(WithLoc<IntExpr>),
     // Bool(WithLoc<BoolExpr>),
 }
@@ -270,6 +271,11 @@ impl Expr {
                 acc.extend(e.free_vars());
                 acc
             }),
+            Index(arr, idx) => {
+                let mut fv = arr.free_vars();
+                fv.extend(idx.free_vars());
+                fv
+            }
         }
     }
 
@@ -282,6 +288,7 @@ impl Expr {
             Expr::BinOp(_, left, right) => left.contains_bool_var() || right.contains_bool_var(),
             Expr::UnOp(_, inner) => inner.contains_bool_var(),
             Expr::Array(elems) => elems.iter().any(|e| e.contains_bool_var()),
+            Expr::Index(arr, idx) => arr.contains_bool_var() || idx.contains_bool_var(),
         }
     }
 }
@@ -300,6 +307,8 @@ impl Display for Expr {
             BinOp(op, left, right) => f.write_str(&format!("({} {} {})", left, op, right)),
             UnOp(op, inner) => f.write_str(&format!("{}{}", op, inner)),
             Array(elems) => f.write_str(&format!("[{}]", sep_string_display(elems, ", "))),
+            // TODO: risky that we're leaving out () around `arr`, but works because currently arr can only be a leaf expr
+            Index(arr, idx) => f.write_str(&format!("{}[{}]", arr, idx)),
         }
     }
 }

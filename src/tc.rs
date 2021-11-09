@@ -505,7 +505,7 @@ impl TypeChecker {
                     None => (Type::Unit, stmt.loc),
                 };
 
-                if retty != *retty_expected {
+                if retty != *retty_expected && retty != Type::Unknown {
                     let [color1, color2] = colors();
 
                     Report::build(ariadne::ReportKind::Error, &self.src_file, loc.start)
@@ -1056,6 +1056,78 @@ impl TypeChecker {
                 }
                 Type::Array(Box::new(WithLoc::no_loc(t)))
             }
+            Expr::Index(arr, idx) => {
+                let arr_t = self.tc_exp(arr);
+                let idx_t = self.tc_exp(idx);
+
+                // arr_t must be an array
+                let elem_t = match arr_t {
+                    Type::Array(el_t) => {
+                        el_t.elem.clone()
+                    }
+                    Type::Unknown => {
+                        arr_t
+                    }
+                    t => {
+                        let [color1, color2] = colors();
+
+                        self.report("index into non-array", arr.loc.start)
+                            .with_label(
+                                Label::new(
+                                    (&self.src_file, arr.loc.range())
+                                )
+                                .with_message(
+                                    format!("base operand of {} is of type {}", "[]".fg(color1), t.to_string().fg(color2))
+                                )
+                                .with_color(color2)
+                            )
+                            .with_note(
+                                "only arrays can be indexed"
+                            )
+                            .finish()
+                            .print((&self.src_file, Source::from(self.src_content.clone())))
+                            .unwrap();
+
+                        self.errors.add(
+                            format!("operand of `[]` is type `{}`, but must be an array", t),
+                            arr.loc,
+                        );
+
+                        Type::Unknown
+                    }
+                };
+
+                if idx_t != Type::Int && idx_t != Type::Unknown {
+                    let [color1, color2] = colors();
+
+                    self.report("index type mismatch", idx.loc.start)
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, idx.loc.range())
+                            )
+                            .with_message(
+                                format!("index is of type {}", idx_t.to_string().fg(color2))
+                            )
+                            .with_color(color2)
+                        )
+                        .with_note(
+                            format!(
+                                "array indices must be {}s",
+                                "int".fg(color1),
+                            )
+                        )
+                        .finish()
+                        .print((&self.src_file, Source::from(self.src_content.clone())))
+                        .unwrap();
+
+                    self.errors.add(
+                        format!("index of array is of type `{}`, but must be an int", idx_t),
+                        idx.loc,
+                    );
+                }
+
+                elem_t
+            }
         }
     }
 }
@@ -1107,6 +1179,7 @@ pub fn type_of(e: &Expr) -> Type {
         Expr::UnOp(WithLoc { elem: Not, .. }, _) => Bool,
         // TODO: fix? Also, do we need a type array initializer? [] is ambiguous otherwise
         Expr::Array(WithLoc { elem: _, loc }) => Array(Box::new(WithLoc { elem: Int, loc: loc.clone() })),
+        Expr::Index(arr, idx) => Unknown,
     }
 }
 
