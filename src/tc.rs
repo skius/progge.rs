@@ -602,7 +602,8 @@ impl TypeChecker {
 
 
                 // To allow continuing type checking, we set the type to the possibly incorrect expression's type
-                v.set_type(t);
+                // Actually this doesn't do much, since we don't update curr_s_ty_ctx.
+                // v.set_type(t);
 
                 if t != curr_ty && t != Type::Unknown {
                     let [color_var, color1, color2] = colors();
