@@ -9,9 +9,14 @@ fn analyze() {
     if x < arr[2] && barr[0] {
         // should still be taken, since we know nothing about arr[2] or barr[0]
         x = -2;
+    } else {
+        if x < arr[2] && !barr[0] {
+            // should also be taken
+            x = -3;
+        }
     }
 
-    // x can be 0 or -2
+    // x can be 0 or -2 or -3
     return;
 }
 

@@ -15,6 +15,7 @@ use crate::tc::ScopedTypeContext;
 pub struct IntraProcCFG {
     pub graph: IntraGraph,
     pub entry: NodeIndex,
+    pub exit: NodeIndex,
     pub params: Vec<Param>,
 }
 
@@ -82,120 +83,127 @@ impl Display for IREdge {
     }
 }
 
-fn add_block_to_graph(
-    graph: &mut IntraGraph,
-    block: &Block,
-    mut prev_nodes: Vec<(NodeIndex, IREdge)>,
-) -> Vec<(NodeIndex, IREdge)> {
-    for stm in &**block {
-        match **stm {
-            Stmt::Testcase() => {
-                let added = graph.add_node(IRTestcase);
-                for (prev_node, connect_prev) in &prev_nodes {
-                    graph.add_edge(*prev_node, added, *connect_prev);
+impl IntraProcCFG {
+    fn add_block_to_graph(
+        &mut self,
+        block: &Block,
+        mut prev_nodes: Vec<(NodeIndex, IREdge)>,
+    ) -> Vec<(NodeIndex, IREdge)> {
+        for stm in &**block {
+            match **stm {
+                Stmt::Testcase() => {
+                    let added = self.graph.add_node(IRTestcase);
+                    for (prev_node, connect_prev) in &prev_nodes {
+                        self.graph.add_edge(*prev_node, added, *connect_prev);
+                    }
+                    prev_nodes = vec![(added, Fallthrough)];
                 }
-                prev_nodes = vec![(added, Fallthrough)];
-            }
-            Stmt::Unreachable() => {
-                let added = graph.add_node(IRUnreachable);
-                for (prev_node, connect_prev) in &prev_nodes {
-                    graph.add_edge(*prev_node, added, *connect_prev);
+                Stmt::Unreachable() => {
+                    let added = self.graph.add_node(IRUnreachable);
+                    for (prev_node, connect_prev) in &prev_nodes {
+                        self.graph.add_edge(*prev_node, added, *connect_prev);
+                    }
+                    prev_nodes = vec![(added, Fallthrough)];
                 }
-                prev_nodes = vec![(added, Fallthrough)];
-            }
-            Stmt::Return(ref e_opt) => {
-                let added = match e_opt {
-                    Some(e) => graph.add_node(IRReturn(Some(e.elem.clone()))),
-                    None => graph.add_node(IRReturn(None)),
-                };
-                for (prev_node, connect_prev) in &prev_nodes {
-                    graph.add_edge(*prev_node, added, *connect_prev);
+                Stmt::Return(ref e_opt) => {
+                    let added = match e_opt {
+                        Some(e) => self.graph.add_node(IRReturn(Some(e.elem.clone()))),
+                        None => self.graph.add_node(IRReturn(None)),
+                    };
+                    for (prev_node, connect_prev) in &prev_nodes {
+                        self.graph.add_edge(*prev_node, added, *connect_prev);
+                    }
+                    // prev_nodes = vec![(added, Fallthrough)];
+                    self.graph.add_edge(added, self.exit, Fallthrough);
+                    prev_nodes = vec![];
                 }
-                // prev_nodes = vec![(added, Fallthrough)];
-                prev_nodes = vec![];
-            }
-            Stmt::Decl(ref v, ref e) => {
-                let added = graph.add_node(IRDecl(v.elem.clone(), e.elem.clone()));
-                for (prev_node, connect_prev) in &prev_nodes {
-                    graph.add_edge(*prev_node, added, *connect_prev);
+                Stmt::Decl(ref v, ref e) => {
+                    let added = self.graph.add_node(IRDecl(v.elem.clone(), e.elem.clone()));
+                    for (prev_node, connect_prev) in &prev_nodes {
+                        self.graph.add_edge(*prev_node, added, *connect_prev);
+                    }
+                    prev_nodes = vec![(added, Fallthrough)];
                 }
-                prev_nodes = vec![(added, Fallthrough)];
-            }
-            Stmt::Assn(ref v, ref e) => {
-                let added = graph.add_node(IRAssn(v.elem.clone(), e.elem.clone()));
-                for (prev_node, connect_prev) in &prev_nodes {
-                    graph.add_edge(*prev_node, added, *connect_prev);
+                Stmt::Assn(ref v, ref e) => {
+                    let added = self.graph.add_node(IRAssn(v.elem.clone(), e.elem.clone()));
+                    for (prev_node, connect_prev) in &prev_nodes {
+                        self.graph.add_edge(*prev_node, added, *connect_prev);
+                    }
+                    prev_nodes = vec![(added, Fallthrough)];
                 }
-                prev_nodes = vec![(added, Fallthrough)];
-            }
-            Stmt::IfElse {
-                ref cond,
-                ref if_branch,
-                ref else_branch,
-            } => {
-                let branch = graph.add_node(IRCBranch(cond.deref().clone()));
-                for (prev_node, connect_prev) in &prev_nodes {
-                    graph.add_edge(*prev_node, branch, *connect_prev);
-                }
+                Stmt::IfElse {
+                    ref cond,
+                    ref if_branch,
+                    ref else_branch,
+                } => {
+                    let branch = self.graph.add_node(IRCBranch(cond.deref().clone()));
+                    for (prev_node, connect_prev) in &prev_nodes {
+                        self.graph.add_edge(*prev_node, branch, *connect_prev);
+                    }
 
-                // let if_root = graph.add_node(IRSkip);
-                // let else_root = graph.add_node(IRSkip);
-                // graph.add_edge(branch, if_root, Taken);
-                // graph.add_edge(branch, else_root, NotTaken);
+                    // let if_root = graph.add_node(IRSkip);
+                    // let else_root = graph.add_node(IRSkip);
+                    // graph.add_edge(branch, if_root, Taken);
+                    // graph.add_edge(branch, else_root, NotTaken);
 
-                let mut prev_nodes_if = add_block_to_graph(graph, if_branch, vec![(branch, Taken)]);
-                let mut prev_nodes_else =
-                    add_block_to_graph(graph, else_branch, vec![(branch, NotTaken)]);
+                    let mut prev_nodes_if = self.add_block_to_graph(if_branch, vec![(branch, Taken)]);
+                    let mut prev_nodes_else =
+                        self.add_block_to_graph(else_branch, vec![(branch, NotTaken)]);
 
-                prev_nodes_if.append(&mut prev_nodes_else);
-                prev_nodes = prev_nodes_if;
+                    prev_nodes_if.append(&mut prev_nodes_else);
+                    prev_nodes = prev_nodes_if;
+                }
+                Stmt::While {
+                    ref cond,
+                    ref block,
+                } => {
+                    // prev -> branch -TRUE-> block_root -> ...block... |
+                    //          | /\-------------------------------------
+                    //          |
+                    //          -FALSE---> after_node
+
+                    let branch = self.graph.add_node(IRCBranch(cond.deref().clone()));
+                    for (prev_node, connect_prev) in &prev_nodes {
+                        self.graph.add_edge(*prev_node, branch, *connect_prev);
+                    }
+                    // let block_root = graph.add_node(IRSkip);
+                    // graph.add_edge(branch, block_root, Taken);
+                    let prev_nodes_block = self.add_block_to_graph(block, vec![(branch, Taken)]);
+                    for (prev_node, connect_prev) in prev_nodes_block {
+                        self.graph.add_edge(prev_node, branch, connect_prev);
+                    }
+
+                    prev_nodes = vec![(branch, NotTaken)];
+                }
             }
-            Stmt::While {
-                ref cond,
-                ref block,
-            } => {
-                // prev -> branch -TRUE-> block_root -> ...block... |
-                //          | /\-------------------------------------
-                //          |
-                //          -FALSE---> after_node
 
-                let branch = graph.add_node(IRCBranch(cond.deref().clone()));
-                for (prev_node, connect_prev) in &prev_nodes {
-                    graph.add_edge(*prev_node, branch, *connect_prev);
-                }
-                // let block_root = graph.add_node(IRSkip);
-                // graph.add_edge(branch, block_root, Taken);
-                let prev_nodes_block = add_block_to_graph(graph, block, vec![(branch, Taken)]);
-                for (prev_node, connect_prev) in prev_nodes_block {
-                    graph.add_edge(prev_node, branch, connect_prev);
-                }
-
-                prev_nodes = vec![(branch, NotTaken)];
+            if prev_nodes.is_empty() {
+                // will never add new nodes
+                break;
             }
         }
 
-        if prev_nodes.is_empty() {
-            // will never add new nodes
-            break;
-        }
+        prev_nodes
     }
-
-    prev_nodes
 }
 
 impl From<&FuncDef> for IntraProcCFG {
     fn from(f: &FuncDef) -> Self {
         let mut graph = DiGraph::new();
         let entry = graph.add_node(IRSkip);
+        let exit = graph.add_node(IRSkip);
 
-        let prev_node = entry;
-        let _exit_nodes = add_block_to_graph(&mut graph, &f.body, vec![(prev_node, Fallthrough)]);
-
-        IntraProcCFG {
+        let mut res = IntraProcCFG {
             graph,
             entry,
+            exit,
             params: f.params.elem.clone(),
-        }
+        };
+
+        let prev_node = entry;
+        let _exit_nodes = res.add_block_to_graph(&f.body, vec![(prev_node, Fallthrough)]);
+
+        res
     }
 }
 

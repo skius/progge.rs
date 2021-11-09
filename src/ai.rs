@@ -9,9 +9,10 @@ use petgraph::prelude::Dfs;
 use petgraph::visit::EdgeRef;
 use petgraph::Direction::{Incoming, Outgoing};
 
-use crate::ast::BinOpcode;
+use crate::ast::{BinOpcode, Type, Var};
 use crate::ast::{Expr, UnOpcode, WithLoc};
 use crate::ir::{IREdge, IRNode, IntraProcCFG};
+use crate::ir::IRNode::IRReturn;
 
 // TODO: to counteract bool_vars causing imprecisions, add (optional) preprocessing step
 // that tries to inline all uses of bool vars. needs other static analyses first
@@ -34,6 +35,14 @@ impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
             if !self.state_map[&edge.id()].is_bottom(&self.man) {
                 let mut vars = self.env.keys().map(|v| v.as_str()).collect::<Vec<_>>();
                 vars.sort();
+                let src = self.cfg.graph.edge_endpoints(edge.id()).unwrap().0;
+                if let IRReturn(_) = self.cfg.graph[src] {
+                    // ignore
+                } else {
+                    // if we're not an outgoing edge of a return statement, don't print @RETURN@
+                    // which is always index 0
+                    vars.remove(0);
+                }
                 for v in vars {
                     intervals += &format!(
                         "{}: {:?}\\n",
@@ -119,6 +128,8 @@ impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
 //     format!("{}", dot)
 // }
 
+static RETURN_VAR: &'static str = "@RETURN@";
+
 fn env_from_cfg(cfg: &IntraProcCFG) -> Environment {
     let graph = &cfg.graph;
     let entry = cfg.entry;
@@ -137,6 +148,7 @@ fn env_from_cfg(cfg: &IntraProcCFG) -> Environment {
         .map(|v| v.0)
         .collect::<Vec<_>>();
     free_vars.sort();
+    free_vars.push(RETURN_VAR.to_string());
     // println!("{:?}", free_vars);
     Environment::new(free_vars)
 }
@@ -294,9 +306,14 @@ fn handle_irnode<M: Manager>(
             state.assign(man, env, v.as_str(), &texpr);
             None
         }
-        IRReturn(_e) => {
+        IRReturn(Some(e)) => {
             // TODO: Handle return better. How?
 
+            // this panics if e is not an int expression
+            handle_irnode(man, env, &IRAssn(Var(RETURN_VAR.to_string(), Type::Int), e.clone()), state)
+        }
+        IRReturn(None) => {
+            // unhandled
             None
         }
         IRCBranch(cond) => {
