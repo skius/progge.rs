@@ -25,5 +25,7 @@ fn some_barr() -> [bool] {
 }
 
 fn some_arr() -> [int] {
-    return [0, 1, 2, 3, 4];
+    let explicit = [1, 2, 3];
+    let default = [0; 3];
+    return default;
 }

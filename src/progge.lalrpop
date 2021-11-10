@@ -172,6 +172,7 @@ LeafExpr: Expr = {
     "false" => Expr::BoolLit(false),
     <n:NameL> "(" <args:WithLoc<Comma<ExprL>>> ")" => Expr::Call(n, args),
     "[" <elems:WithLoc<Comma<ExprL>>> "]" => Expr::Array(elems),
+    "[" <default:ExprL> ";" <size:ExprL> "]" => Expr::DefaultArray { default_value: Box::new(default), size: Box::new(size) },
     <arr:LeafExprL> "[" <idx:ExprL> "]" => Expr::Index(Box::new(arr), Box::new(idx)),
     <n:NameL> => {
  // TODO: instead of panicking, I could use a placeholder type here to complete the parse
