@@ -505,6 +505,16 @@ pub enum Type {
     Array(Box<WithLoc<Type>>),
 }
 
+impl Type {
+    pub fn is_unknown(&self) -> bool {
+        match self {
+            Type::Unknown => true,
+            Type::Array(t) => t.is_unknown(),
+            _ => false,
+        }
+    }
+}
+
 // To ignore the "loc" part of the type
 impl Hash for Type {
     fn hash<H: Hasher>(&self, state: &mut H) {
