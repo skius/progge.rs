@@ -1126,6 +1126,37 @@ impl TypeChecker {
                     col: 0,
                     line: 0,
                 };
+
+                // not allowed, must use "[0; 0]" instead
+                if els.is_empty() {
+                    let [color, color1] = colors();
+
+                    Report::build(ariadne::ReportKind::Error, &self.src_file, exp.loc.start)
+                        .with_message::<&str>("empty explicit array")
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, exp.loc.range())
+                            )
+                            .with_message("array is empty")
+                            .with_color(color1)
+                        )
+                        .with_note(
+                            format!(
+                                "use {} instead, e.g. {}",
+                                "[<value>; 0]".fg(color),
+                                "[false; 0]".fg(color),
+                            )
+                        )
+                        .finish()
+                        .print((&self.src_file, Source::from(self.src_content.clone())))
+                        .unwrap();
+
+                    self.errors.add(
+                        "empty array is not allowed".to_string(),
+                        els.loc,
+                    );
+                }
+
                 for el in els.iter_mut() {
                     let el_t = self.tc_exp(el);
                     if t == Type::Unknown {
