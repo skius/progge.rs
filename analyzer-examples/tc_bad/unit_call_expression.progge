@@ -1,0 +1,8 @@
+fn foo() {
+    let x = bar();
+    return;
+}
+
+fn bar() {
+    return;
+}

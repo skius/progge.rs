@@ -121,6 +121,7 @@ pub Stmt: Stmt = {
     <le:LocExprL> "=" <e:ExprL> => {
         Stmt::Assn(le, e)
     },
+    <c:CallExpr_> => Stmt::Call(c.0, c.1),
 }
 
 LocExprL = WithLoc<LocExpr>;
@@ -170,7 +171,7 @@ LeafExpr: Expr = {
     Int => Expr::IntLit(<>),
     "true" => Expr::BoolLit(true),
     "false" => Expr::BoolLit(false),
-    <n:NameL> "(" <args:WithLoc<Comma<ExprL>>> ")" => Expr::Call(n, args),
+    <c:CallExpr_> => Expr::Call(c.0, c.1),
     "[" <elems:WithLoc<Comma<ExprL>>> "]" => Expr::Array(elems),
     "[" <default:ExprL> ";" <size:ExprL> "]" => Expr::DefaultArray { default_value: Box::new(default), size: Box::new(size) },
     <arr:LeafExprL> "[" <idx:ExprL> "]" => Expr::Index(Box::new(arr), Box::new(idx)),
@@ -189,6 +190,11 @@ LeafExpr: Expr = {
 //    <op:BUnOpL> <e:LeafExprL> => Expr::UnOp(op, Box::new(e)),
     "(" <BExpr0> ")" => <>,
 
+}
+
+//CallExprL = WithLoc<CallExpr>;
+CallExpr_: (WithLoc<String>, WithLoc<Vec<WithLoc<Expr>>>) = {
+    <n:NameL> "(" <args:WithLoc<Comma<ExprL>>> ")" => (n, args),
 }
 
 BExpr0OpL = WithLoc<BExpr0Op>;

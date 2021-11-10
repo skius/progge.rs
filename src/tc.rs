@@ -753,6 +753,11 @@ impl TypeChecker {
                 }
 
             }
+            Stmt::Call(name, args) => {
+                // TODO: typecheck that this is unit
+                let retty = self.tc_call(name, args);
+                None
+            }
             Stmt::IfElse {
                 cond,
                 if_branch,
@@ -906,93 +911,8 @@ impl TypeChecker {
                 }
             }
             Expr::Call(name, args) => {
-                // TODO: Typecheck that function exists
-                let (_, params, retty) = &self.f_ty_ctx[name.as_str()];
-                let retty = (**retty).clone();
-
-                let params_len = params.len();
-                let args_len = args.len();
-
-                if params_len != args_len {
-                    let [color_name, color1, color2] = colors();
-
-                    Report::build(ariadne::ReportKind::Error, &self.src_file, exp.loc.start)
-                        .with_message::<&str>("argument count mismatch")
-                        .with_label(
-                            Label::new(
-                                (&self.src_file, args.loc.start..args.loc.end)
-                                )
-                                .with_message(
-                                    format!("call to function {} with {} arguments", name.as_str().fg(color_name), args_len.to_string().fg(color1))
-                                )
-                                .with_color(color1)
-                        )
-                        .with_label(
-                            Label::new(
-                                (&self.src_file, params.loc.start..params.loc.end)
-                            )
-                                .with_message(
-                                    format!("function {} has {} parameters", name.as_str().fg(color_name), params_len.to_string().fg(color2))
-                                )
-                                .with_color(color2)
-                        )
-                        .with_note(
-                            format!("function calls must provide the same number of arguments as the function expects")
-                        )
-                        .finish()
-                        .print((&self.src_file, Source::from(self.src_content.clone())))
-                        .unwrap();
-
-                    self.errors.add(
-                        format!("argument count mismatch for call to `{}`: {} args given but function expects {}", name, args_len, params_len),
-                        exp.loc,
-                    );
-                }
-
-                // let param_tys = params.iter().map(|p| p.1.clone()).collect::<Vec<_>>();
-
-                params.elem.clone().into_iter().zip(args.iter_mut()).for_each(|((param_v, param_t), arg)| {
-                    let arg_t = self.tc_exp(arg);
-
-                    if arg_t != *param_t {
-                        let [a, b] = colors();
-                        
-                        self.report("argument type mismatch", arg.loc.start)
-                        .with_label(
-                            Label::new(
-                                (&self.src_file, arg.loc.start..arg.loc.end)
-                            )
-                            .with_message(
-                                format!("this expression has type {}", arg_t.to_string().fg(a))
-                            )
-                            .with_color(a)
-                        )
-                        .with_label(
-                            Label::new(
-                                (&self.src_file, param_v.loc.start..param_t.loc.end)
-                            )
-                            .with_message(
-                                format!("this parameter has type {}", param_t.elem.to_string().fg(b))
-                            )
-                            .with_color(b)
-                        )
-                        .with_note(
-                            format!(
-                                "the types of {} and respective {} must match in a call expression",
-                                "arguments".fg(a),
-                                "parameters".fg(b)
-                            )
-                        )
-                        .finish()
-                        .print((&self.src_file, Source::from(self.src_content.clone())))
-                        .unwrap();
-
-                        self.errors.add(
-                            format!("argument type mismatch for call to `{}`: expected type `{}` got type `{}`", name, param_t, arg_t),
-                            arg.loc,
-                        );
-                    }
-                });
+                let retty = self.tc_call(name, args);
+                // TODO: Typecheck this is non-unit
 
                 retty
             }
@@ -1304,6 +1224,98 @@ impl TypeChecker {
         };
         exp.set_type_loc(&t);
         t
+    }
+
+    pub fn tc_call(&mut self, name: &mut WithLoc<String>, args: &mut WithLoc<Vec<WithLoc<Expr>>>) -> Type {
+// TODO: Typecheck that function exists
+        let (_, params, retty) = &self.f_ty_ctx[name.as_str()];
+        let retty = (**retty).clone();
+
+        let params_len = params.len();
+        let args_len = args.len();
+
+        if params_len != args_len {
+            let [color_name, color1, color2] = colors();
+
+            Report::build(ariadne::ReportKind::Error, &self.src_file, args.loc.start)
+                .with_message::<&str>("argument count mismatch")
+                .with_label(
+                    Label::new(
+                        (&self.src_file, args.loc.start..args.loc.end)
+                    )
+                        .with_message(
+                            format!("call to function {} with {} arguments", name.as_str().fg(color_name), args_len.to_string().fg(color1))
+                        )
+                        .with_color(color1)
+                )
+                .with_label(
+                    Label::new(
+                        (&self.src_file, params.loc.start..params.loc.end)
+                    )
+                        .with_message(
+                            format!("function {} has {} parameters", name.as_str().fg(color_name), params_len.to_string().fg(color2))
+                        )
+                        .with_color(color2)
+                )
+                .with_note(
+                    format!("function calls must provide the same number of arguments as the function expects")
+                )
+                .finish()
+                .print((&self.src_file, Source::from(self.src_content.clone())))
+                .unwrap();
+
+            self.errors.add(
+                format!("argument count mismatch for call to `{}`: {} args given but function expects {}", name, args_len, params_len),
+                args.loc,
+            );
+        }
+
+        // let param_tys = params.iter().map(|p| p.1.clone()).collect::<Vec<_>>();
+
+        params.elem.clone().into_iter().zip(args.iter_mut()).for_each(|((param_v, param_t), arg)| {
+            let arg_t = self.tc_exp(arg);
+
+            if arg_t != *param_t {
+                let [a, b] = colors();
+
+                self.report("argument type mismatch", arg.loc.start)
+                    .with_label(
+                        Label::new(
+                            (&self.src_file, arg.loc.start..arg.loc.end)
+                        )
+                            .with_message(
+                                format!("this expression has type {}", arg_t.to_string().fg(a))
+                            )
+                            .with_color(a)
+                    )
+                    .with_label(
+                        Label::new(
+                            (&self.src_file, param_v.loc.start..param_t.loc.end)
+                        )
+                            .with_message(
+                                format!("this parameter has type {}", param_t.elem.to_string().fg(b))
+                            )
+                            .with_color(b)
+                    )
+                    .with_note(
+                        format!(
+                            "the types of {} and respective {} must match in a call expression",
+                            "arguments".fg(a),
+                            "parameters".fg(b)
+                        )
+                    )
+                    .finish()
+                    .print((&self.src_file, Source::from(self.src_content.clone())))
+                    .unwrap();
+
+                self.errors.add(
+                    format!("argument type mismatch for call to `{}`: expected type `{}` got type `{}`", name, param_t, arg_t),
+                    arg.loc,
+                );
+            }
+        });
+
+        retty
     }
 }
 

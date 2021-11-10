@@ -149,7 +149,6 @@ fn env_from_cfg(cfg: &IntraProcCFG) -> Environment {
         .collect::<Vec<_>>();
     free_vars.sort();
     free_vars.push(RETURN_VAR.to_string());
-    // println!("{:?}", free_vars);
     Environment::new(free_vars)
 }
 
@@ -308,6 +307,12 @@ fn handle_irnode<M: Manager>(
         }
         IRAssn(LocExpr::Index(_, _), _) => {
             // TODO: handle arrays in AI
+            None
+        }
+        IRCall(name, args) => {
+            // Can ignore calls for now, but they can change state, namely when we pass arrays, which are by-reference
+            // TODO: Also need to handle special functions like analyze!
+
             None
         }
         IRReturn(Some(e)) => {

@@ -187,6 +187,7 @@ pub enum Stmt {
     Return(Option<WithLoc<Expr>>),
     Decl(WithLoc<Var>, WithLoc<Expr>),
     Assn(WithLoc<LocExpr>, WithLoc<Expr>),
+    Call(WithLoc<String>, WithLoc<Vec<WithLoc<Expr>>>),
     IfElse {
         cond: WithLoc<Expr>,
         if_branch: WithLoc<Block>,
@@ -220,6 +221,9 @@ impl Display for Stmt {
             Return(None) => f.write_str(&format!("return")),
             Decl(v, e) => f.write_str(&format!("let {} = {}", v, e)),
             Assn(v, e) => f.write_str(&format!("{} = {}", v, e)),
+            Call(name, args) => {
+                f.write_str(&format!("{}({})", name, sep_string_display(args, ", ")))
+            }
             IfElse {
                 cond,
                 if_branch,

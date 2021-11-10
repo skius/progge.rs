@@ -1,0 +1,8 @@
+fn foo() {
+    bar();
+    return;
+}
+
+fn bar() -> int {
+    return 0;
+}

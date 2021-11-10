@@ -28,6 +28,7 @@ pub enum IRNode {
     IRSkip,
     IRDecl(Var, Expr),
     IRAssn(LocExpr, Expr),
+    IRCall(String, Vec<Expr>),
     IRReturn(Option<Expr>),
 
     IRCBranch(Expr),
@@ -47,10 +48,17 @@ impl IRNode {
                 fv.extend(le.free_vars());
                 fv
             }
+            IRCall(_, es) => {
+                let mut fv = HashSet::new();
+                for e in es {
+                    fv.extend(e.free_vars());
+                }
+                fv
+            }
             IRReturn(Some(e)) => e.free_vars(),
             IRReturn(None) => HashSet::new(),
             IRCBranch(e) => e.free_vars(),
-            _ => HashSet::new(),
+            IRUnreachable | IRTestcase | IRSkip | IRBranch => HashSet::new(),
         }
     }
 }
@@ -63,6 +71,9 @@ impl Display for IRNode {
             IRSkip => f.write_str("skip"),
             IRDecl(v, e) => f.write_str(&format!("let {} = {}", v, e)),
             IRAssn(v, e) => f.write_str(&format!("{} = {}", v, e)),
+            IRCall(name, args) => {
+                f.write_str(&format!("{}({})", name, sep_string_display(args, ", ")))
+            }
             IRReturn(Some(e)) => f.write_str(&format!("return {}", e)),
             IRReturn(None) => f.write_str(&format!("return")),
             IRCBranch(e) => f.write_str(&format!("<cbranch> {}", e)),
@@ -131,6 +142,13 @@ impl IntraProcCFG {
                 }
                 Stmt::Assn(ref le, ref e) => {
                     let added = self.graph.add_node(IRAssn(le.elem.clone(), e.elem.clone()));
+                    for (prev_node, connect_prev) in &prev_nodes {
+                        self.graph.add_edge(*prev_node, added, *connect_prev);
+                    }
+                    prev_nodes = vec![(added, Fallthrough)];
+                }
+                Stmt::Call(ref f, ref args) => {
+                    let added = self.graph.add_node(IRCall(f.elem.clone(), args.iter().map(|arg| arg.elem.clone()).collect()));
                     for (prev_node, connect_prev) in &prev_nodes {
                         self.graph.add_edge(*prev_node, added, *connect_prev);
                     }

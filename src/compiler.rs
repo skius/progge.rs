@@ -6,7 +6,7 @@ use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::passes::PassManager;
 use inkwell::types::{AnyType, BasicMetadataTypeEnum, BasicTypeEnum};
-use inkwell::values::{InstructionOpcode, BasicValue, BasicMetadataValueEnum, FloatValue, IntValue, FunctionValue, PointerValue, BasicValueEnum, AnyValue, AnyValueEnum};
+use inkwell::values::{InstructionOpcode, BasicValue, BasicMetadataValueEnum, FloatValue, IntValue, FunctionValue, PointerValue, BasicValueEnum, AnyValue, AnyValueEnum, CallSiteValue};
 use inkwell::{OptimizationLevel, FloatPredicate, IntPredicate, AddressSpace};
 use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine};
 use crate::ast::{BinOpcode, Block, Expr, FuncDef, LocExpr, Program, Stmt, Type, UnOpcode, Var, WithLoc};
@@ -83,6 +83,13 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
         let alloc_array_default_res = self.builder.build_call(*alloc_array_default_fn, &[size.into(), default.into()], "alloc_array_default");
 
         alloc_array_default_res.try_as_basic_value().left().unwrap().into_pointer_value()
+    }
+
+    fn compile_call(&mut self, name: &WithLoc<String>, args: &WithLoc<Vec<WithLoc<Expr>>>) -> CallSiteValue<'ctx> {
+        let args = args.iter().map(|e| self.compile_exp(e).into()).collect::<Vec<_>>();
+        let func = self.functions.get(name.as_str()).unwrap();
+        let call_res = self.builder.build_call(*func, &args[..], name.as_str());
+        call_res
     }
 
     fn compile_loc_exp(&mut self, lexp: &WithLoc<LocExpr>) -> PointerValue<'ctx> {
@@ -190,9 +197,7 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
                 }
             }
             Expr::Call(name, args) => {
-                let args = args.iter().map(|e| self.compile_exp(e).into()).collect::<Vec<_>>();
-                let func = self.functions.get(name.as_str()).unwrap();
-                let call_res = self.builder.build_call(*func, &args[..], name.as_str());
+                let call_res = self.compile_call(name, args);
                 // if we typecheck correctly and do not allow void functions to be in expression calls, then this will always work
                 call_res.try_as_basic_value().unwrap_left().into()
             }
@@ -267,6 +272,10 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
                 let ptr = self.compile_loc_exp(le);
                 self.builder.build_store(ptr, val.into_int_value());
             },
+            Stmt::Call(name, args) => {
+                let call_res = self.compile_call(name, args);
+
+            }
             Stmt::IfElse { cond, if_branch, else_branch } => {
                 let cond = self.compile_exp(cond).into_int_value();
                 let cond = self.builder.build_int_truncate(cond, self.context.bool_type(), "cond_cast");
