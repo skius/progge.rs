@@ -258,7 +258,7 @@ Type: Type = {
 //}
 
 NameL = WithLoc<Name>;
-Name: String = r"[A-Za-z_][A-Za-z0-9_]*" => (<>).to_owned();
+Name: String = r"[A-Za-z_][A-Za-z0-9_]*!?" => (<>).to_owned();
 
 IntL = WithLoc<Int>;
 Int: i64 = r"[0-9]+" => i64::from_str(<>).unwrap();
