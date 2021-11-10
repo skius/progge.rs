@@ -1,3 +1,4 @@
+use std::arch::x86_64::_mm256_undefined_pd;
 use std::collections::HashMap;
 use std::process::Command;
 use inkwell::builder::Builder;
@@ -70,13 +71,18 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
         self.context.i64_type().into()
     }
 
-    fn compile_array_alloc(&mut self, size: u64) -> PointerValue<'ctx> {
-        let size = self.context.i64_type().const_int(size as u64, false);
-
+    fn compile_array_alloc(&mut self, size: IntValue<'ctx>) -> PointerValue<'ctx> {
         let alloc_array_fn = self.functions.get("alloc_array").unwrap();
         let alloc_array_res = self.builder.build_call(*alloc_array_fn, &[size.into()], "alloc_array");
 
         alloc_array_res.try_as_basic_value().left().unwrap().into_pointer_value()
+    }
+
+    fn compile_array_alloc_default(&mut self, size: IntValue<'ctx>, default: IntValue<'ctx>) -> PointerValue<'ctx> {
+        let alloc_array_default_fn = self.functions.get("alloc_array_default").unwrap();
+        let alloc_array_default_res = self.builder.build_call(*alloc_array_default_fn, &[size.into(), default.into()], "alloc_array_default");
+
+        alloc_array_default_res.try_as_basic_value().left().unwrap().into_pointer_value()
     }
 
     fn compile_loc_exp(&mut self, lexp: &WithLoc<LocExpr>) -> PointerValue<'ctx> {
@@ -193,13 +199,14 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
             // Progge array representation: pointer to array of size+1 elements, element 0 is size
             // also, arrays are reference types
             Expr::Array(els) => {
-                let ty = match &exp.typ {
-                    Type::Array(t) => t.clone(),
-                    _ => panic!("Expected array type")
-                };
+                // let ty = match &exp.typ {
+                //     Type::Array(t) => t.clone(),
+                //     _ => panic!("Expected array type")
+                // };
 
                 let size = els.len();
-                let arr_ptr = self.compile_array_alloc(size as u64);
+                let size = self.context.i64_type().const_int(size as u64, false);
+                let arr_ptr = self.compile_array_alloc(size);
 
                 unsafe {
                     for (i, el) in els.iter().enumerate() {
@@ -220,6 +227,13 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
                         self.builder.build_store(gep, el);
                     }
                 }
+
+                self.builder.build_ptr_to_int(arr_ptr, self.context.i64_type(), "arr_ptr_int").into()
+            }
+            Expr::DefaultArray { default_value, size } => {
+                let size = self.compile_exp(size);
+                let default_value = self.compile_exp(default_value);
+                let arr_ptr = self.compile_array_alloc_default(size.into_int_value(), default_value.into_int_value());
 
                 self.builder.build_ptr_to_int(arr_ptr, self.context.i64_type(), "arr_ptr_int").into()
             }
@@ -416,6 +430,10 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
         let alloc_array = self.context.i64_type().ptr_type(AddressSpace::Generic).fn_type(&[self.context.i64_type().into()], false);
         let alloc_array_fn = self.module.add_function("alloc_array", alloc_array, None);
         self.functions.insert("alloc_array".to_string(), alloc_array_fn);
+
+        let alloc_array_default = self.context.i64_type().ptr_type(AddressSpace::Generic).fn_type(&[self.context.i64_type().into(), self.context.i64_type().into()], false);
+        let alloc_array_default_fn = self.module.add_function("alloc_array_default", alloc_array_default, None);
+        self.functions.insert("alloc_array_default".to_string(), alloc_array_default_fn);
 
         let funcdefs = self.program.0.clone();
         // Build decl map
