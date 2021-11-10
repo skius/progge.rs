@@ -546,7 +546,6 @@ impl TypeChecker {
             Stmt::Decl(v, e) => {
                 let t = self.tc_exp(e);
 
-
                 // let binding opens a new scope
                 self.open_scope();
 
@@ -1303,7 +1302,7 @@ impl TypeChecker {
                 elem_t
             }
         };
-        exp.set_type(&t);
+        exp.set_type_loc(&t);
         t
     }
 }

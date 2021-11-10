@@ -34,7 +34,8 @@ impl<T: Debug + Clone> WithLoc<T> {
         WithLoc { elem, loc, typ: Type::Unknown }
     }
 
-    pub fn set_type(&mut self, t: &Type) {
+    // different name than "set_type" to avoid clashing with self.deref().set_type()
+    pub fn set_type_loc(&mut self, t: &Type) {
         self.typ = t.clone();
     }
 }
