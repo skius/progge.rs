@@ -17,6 +17,8 @@ fn main() -> Result<(), TcError> {
     // de brujin indices), open a new one whenever you open a new scope. if you need to look up
     // a variable's type, you look first in the top hashmap, then go down.
 
+    //proggers::compiler::tryme();
+
     let config = parse_args();
 
     let src_file = &config.src_file;
@@ -27,8 +29,6 @@ fn main() -> Result<(), TcError> {
         .parse(src_file, &src, &mut tctx, &src)
         .unwrap();
 
-    
-    
     if config.print_cfg {
         let analyze = IntraProcCFG::from(&**prog.find_funcdef("analyze").unwrap());
         println!("{}", analyze.graphviz());
@@ -53,6 +53,9 @@ fn main() -> Result<(), TcError> {
         let ai_env = proggers::ai::run(&analyze);
         println!("{}", ai_env.graphviz());
     }
+    if let Some(output) = config.compile_target {
+        proggers::compiler::compile(prog.clone().elem, &output, config.verbose);
+    }
 
     Ok(())
 }
@@ -63,7 +66,8 @@ struct Config {
     print_ast: bool,
     do_tc: bool,
     do_ai: bool,
-
+    compile_target: Option<String>,
+    verbose: bool,
 }
 
 fn parse_args() -> Config {
@@ -76,9 +80,19 @@ fn parse_args() -> Config {
         print_ast: false,
         do_tc: false,
         do_ai: false,
+        compile_target: None,
+        verbose: false,
     };
 
-    for arg in args[1..].into_iter() {
+
+    let mut got_operand = false;
+    for (i, arg) in args[1..].iter().enumerate() {
+        // we are skipping first element, so add it back
+        let i = i + 1;
+        if got_operand {
+            got_operand = false;
+            continue;
+        }
         match arg.as_str() {
             "--all" => {
                 cfg.print_cfg = true;
@@ -90,6 +104,15 @@ fn parse_args() -> Config {
             "--typecheck" | "-t" => cfg.do_tc = true,
             "--analyze" | "-a" => cfg.do_ai = true,
             "--ast" => cfg.print_ast = true,
+            "--verbose" | "-v" => cfg.verbose = true,
+            "--output" | "-o" => {
+                if i + 1 >= args.len() || args[i + 1].starts_with("-") {
+                    eprintln!("{}: error: missing argument to `{}`", executable, arg);
+                    exit(1);
+                }
+                cfg.compile_target = Some(args[i + 1].clone());
+                got_operand = true;
+            },
             _ => {
                 if cfg.src_file.is_empty() && !arg.starts_with("-") {
                     cfg.src_file = arg.clone();
@@ -104,7 +127,7 @@ fn parse_args() -> Config {
     // if no sourcefile, print usage and exit
     if cfg.src_file.is_empty() {
         eprintln!("{}: error: no source file specified", executable);
-        eprintln!("usage: {} <sourcefile> [--all] [--cfg] [--typecheck] [--analyze] [--ast]", executable);
+        eprintln!("usage: {} <sourcefile> [--all] [--cfg] [--typecheck] [--analyze] [--ast] [-o <compilation output>]", executable);
         exit(1);
     }
 
@@ -112,6 +135,15 @@ fn parse_args() -> Config {
     if cfg.do_ai && !cfg.do_tc {
         eprintln!(
             "{}: error: --analyze requires --typecheck",
+            executable
+        );
+        exit(1);
+    }
+
+    // compilation requires typecheck
+    if cfg.compile_target.is_some() && !cfg.do_tc {
+        eprintln!(
+            "{}: error: --output requires --typecheck",
             executable
         );
         exit(1);

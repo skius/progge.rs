@@ -1,0 +1,16 @@
+fn program(argc: int) -> int {
+    let fac = print_int(fac(int_arg(1)));
+    let i = 0;
+    while i <= fac {
+        let _ = print_int(i);
+        i = i + 1;
+    }
+    return 0;
+}
+
+fn fac(n: int) -> int {
+    if n <= 1 {
+        return 1;
+    }
+    return n * fac(n-1);
+}

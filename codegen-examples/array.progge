@@ -1,0 +1,29 @@
+fn program(_argc: int) -> int {
+    let arr_v = [[0], [0,1,2,3,4]];
+    let arr_inner = double_index(arr_v);
+    arr_inner[1] = 100;
+
+    if arr_v[0][0] == 1 {
+        let _ = print_int(_argc);
+    }
+    let _ = print_int(111111111111111);
+    // prints 100 because Progge's arrays are by-reference
+    let _ = print_int(arr_v[1][1]);
+
+    let _ = print_int(111111111111111);
+
+    let dyn_arr = [42; _argc];
+    let i = 0;
+    while i < _argc {
+        let _ = print_int(dyn_arr[i]);
+        i = i + 1;
+    }
+
+    return 0;
+}
+
+fn double_index(barr: [[int]]) -> [int] {
+    let size = 1;
+    barr[0] = [1; size];
+    return barr[1];
+}

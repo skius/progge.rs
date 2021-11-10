@@ -18,3 +18,4 @@ lalrpop-util = { version = "0.19.6", features = ["lexer", "regex"] }
 regex = "1"
 petgraph = "0.6.0"
 ariadne = "0.1.3"
+inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm13-0"] }
