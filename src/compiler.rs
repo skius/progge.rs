@@ -5,10 +5,10 @@ use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::passes::PassManager;
 use inkwell::types::{AnyType, BasicMetadataTypeEnum, BasicTypeEnum};
-use inkwell::values::{BasicValue, BasicMetadataValueEnum, FloatValue, IntValue, FunctionValue, PointerValue, BasicValueEnum, AnyValue, AnyValueEnum};
-use inkwell::{OptimizationLevel, FloatPredicate, IntPredicate};
+use inkwell::values::{InstructionOpcode, BasicValue, BasicMetadataValueEnum, FloatValue, IntValue, FunctionValue, PointerValue, BasicValueEnum, AnyValue, AnyValueEnum};
+use inkwell::{OptimizationLevel, FloatPredicate, IntPredicate, AddressSpace};
 use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine};
-use crate::ast::{BinOpcode, Block, Expr, FuncDef, LocExpr, Program, Stmt, Type, UnOpcode, Var};
+use crate::ast::{BinOpcode, Block, Expr, FuncDef, LocExpr, Program, Stmt, Type, UnOpcode, Var, WithLoc};
 
 
 pub struct Compiler<'a, 'ctx> {
@@ -39,7 +39,7 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
     }
 
     /// Creates a new stack allocation instruction in the entry block of the function.
-    fn create_entry_block_alloca(&self, name: &str) -> PointerValue<'ctx> {
+    fn create_entry_block_alloca(&self, name: &str, t: &Type) -> PointerValue<'ctx> {
         let builder = self.context.create_builder();
 
         let entry = self.fn_value().get_first_basic_block().unwrap();
@@ -49,34 +49,80 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
             None => builder.position_at_end(entry)
         }
 
+        // match t {
+        //     Type::Int | Type::Array(_) => builder.build_alloca(self.context.i64_type(), name),
+        //     Type::Bool => builder.build_alloca(self.context.bool_type(), name),
+        //     // Type::Array(_) => builder.build_alloca(self.context.i64_type().ptr_type(AddressSpace::Generic), name),
+        //     t => panic!("Unsupported type: {:?}", t),
+        // }
+
         builder.build_alloca(self.context.i64_type(), name)
     }
 
     fn compile_ty(&mut self, t: &Type) -> BasicMetadataTypeEnum<'ctx> {
-        match t {
-            Type::Int => self.context.i64_type().into(),
-            Type::Bool => self.context.bool_type().into(),
-            // TODO: handle Unit in Typechecker?
-            // Type::Unit => self.context.void_type().into(),
-            _ => panic!("Unsupported type: {:?}", t)
+        // match t {
+        //     Type::Int => self.context.i64_type().into(),
+        //     Type::Bool => self.context.bool_type().into(),
+        //     // TODO: handle Unit in Typechecker?
+        //     // Type::Unit => self.context.void_type().into(),
+        //     _ => panic!("Unsupported type: {:?}", t)
+        // }
+        self.context.i64_type().into()
+    }
+
+    fn compile_array_alloc(&mut self, size: u64) -> PointerValue<'ctx> {
+        let size = self.context.i64_type().const_int(size as u64, false);
+
+        let alloc_array_fn = self.functions.get("alloc_array").unwrap();
+        let alloc_array_res = self.builder.build_call(*alloc_array_fn, &[size.into()], "alloc_array");
+
+        alloc_array_res.try_as_basic_value().left().unwrap().into_pointer_value()
+    }
+
+    fn compile_loc_exp(&mut self, lexp: &WithLoc<LocExpr>) -> PointerValue<'ctx> {
+        match &lexp.elem {
+            LocExpr::Var(v) => {
+                *self.variables.get(&v.elem).unwrap()
+            }
+            LocExpr::Index(arr, idx) => {
+                let arr_t = match &arr.typ {
+                    Type::Array(t) => t.clone(),
+                    _ => panic!("Expected array type")
+                };
+
+                let arr_ptr = self.compile_exp(arr);
+                let arr_ptr = self.builder.build_int_to_ptr(arr_ptr.into_int_value(), self.context.i64_type().ptr_type(AddressSpace::Generic), "arr_ptr");
+                let idx = self.compile_exp(idx);
+                let idx = self.builder.build_int_add(idx.into_int_value(), self.context.i64_type().const_int(1, false), "idx_add");
+                let gep = unsafe { self.builder.build_gep(
+                    arr_ptr,
+                    &[
+                        // self.context.i64_type().const_int(0, false),
+                        idx,
+                    ],
+                    "arr_idx"
+                )};
+                gep
+            }
         }
     }
 
-    fn compile_exp(&mut self, exp: &Expr) -> BasicValueEnum<'ctx> {
-        match exp {
+    // Must always return an IntValue.. make it part of the type?
+    fn compile_exp(&mut self, exp: &WithLoc<Expr>) -> BasicValueEnum<'ctx> {
+        match &exp.elem {
             Expr::IntLit(i) => {
                 let i64_type = self.context.i64_type();
                 let i64_val = i64_type.const_int(*i as u64, false);
                 i64_val.into()
             },
             Expr::BoolLit(b) => {
-                let bool_type = self.context.bool_type();
+                let bool_type = self.context.i64_type();
                 let bool_val = bool_type.const_int(*b as u64, false);
                 bool_val.into()
             },
             Expr::Var(v) => {
-                let ptr = self.variables.get(v).unwrap();
-                self.builder.build_load(*ptr, v.as_str())
+                let ptr = self.compile_loc_exp(&WithLoc::new(LocExpr::Var(v.clone()), v.loc));
+                self.builder.build_load(ptr, v.as_str())
             },
             Expr::BinOp(op, left, right) => {
                 let left = self.compile_exp(left);
@@ -144,17 +190,43 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
                 // if we typecheck correctly and do not allow void functions to be in expression calls, then this will always work
                 call_res.try_as_basic_value().unwrap_left().into()
             }
-            // Expr::Array(els) => {
-            //     // TODO: Add type to WithLoc
-            //     let els = els.iter().map(|e| self.compile_exp(e)).collect::<Vec<_>>();
-            //     let array_type = self.context.i32_type().array_type(els.len() as u32);
-            //     let array_ptr = self.builder.build_alloca(array_type, "arraytmp");
-            //     for (i, el) in els.iter().enumerate() {
-            //         let el_ptr = self.builder.build_gep(array_ptr, &[self.context.i32_type().const_int(i as u64, false)], "elptr");
-            //         self.builder.build_store(el_ptr, el.into_pointer_value());
-            //     }
-            //     array_ptr.into()
-            // }
+            // Progge array representation: pointer to array of size+1 elements, element 0 is size
+            // also, arrays are reference types
+            Expr::Array(els) => {
+                let ty = match &exp.typ {
+                    Type::Array(t) => t.clone(),
+                    _ => panic!("Expected array type")
+                };
+
+                let size = els.len();
+                let arr_ptr = self.compile_array_alloc(size as u64);
+
+                unsafe {
+                    for (i, el) in els.iter().enumerate() {
+                        let gep = self.builder.build_gep(
+                            arr_ptr,
+                            &[
+                                // self.context.i64_type().const_int(0, false),
+                                self.context.i64_type().const_int((i+1) as u64, false)
+                            ],
+                            "arr_idx"
+                        );
+
+                        let el = self.compile_exp(el);
+                        // let el_i64: BasicValueEnum = match &ty.elem {
+                        //     // Type::Array(_) => self.builder.build_ptr_to_int(el.into_pointer_value(), self.context.i64_type(), "cast"),
+                        //     _ => self.builder.build_int_z_extend_or_bit_cast(el.into_int_value(), self.context.i64_type(), "cast").into(),
+                        // };
+                        self.builder.build_store(gep, el);
+                    }
+                }
+
+                self.builder.build_ptr_to_int(arr_ptr, self.context.i64_type(), "arr_ptr_int").into()
+            }
+            Expr::Index(arr, idx) => {
+                let ptr = self.compile_loc_exp(&WithLoc::new(LocExpr::Index((**arr).clone(), (**idx).clone()), exp.loc));
+                self.builder.build_load(ptr, "arr_idx_load").into()
+            }
             e => panic!("Unsupported expression: {:?}", e)
         }
     }
@@ -171,25 +243,19 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
             Stmt::Decl(v, e) => {
                 let val = self.compile_exp(e);
 
-                let alloca = self.create_entry_block_alloca(v.as_str());
+                let alloca = self.create_entry_block_alloca(v.as_str(), &e.typ);
                 self.builder.build_store(alloca, val);
 
                 self.variables.insert(v.elem.clone(), alloca);
             },
             Stmt::Assn(le, e) => {
-                match &le.elem {
-                    LocExpr::Var(v) => {
-                        let val = self.compile_exp(e);
-                        let var = self.variables.get(v).unwrap();
-                        // TODO: If we add other types than Int/Bool, we will need to handle these .into_int_values() differently.
-                        // currently everything works out, because bools are ints in LLVM
-                        self.builder.build_store(*var, val.into_int_value());
-                    }
-                    LocExpr::Index(_, _) => { todo!("handle index assns") }
-                }
+                let val = self.compile_exp(e);
+                let ptr = self.compile_loc_exp(le);
+                self.builder.build_store(ptr, val.into_int_value());
             },
             Stmt::IfElse { cond, if_branch, else_branch } => {
                 let cond = self.compile_exp(cond).into_int_value();
+                let cond = self.builder.build_int_truncate(cond, self.context.bool_type(), "cond_cast");
                 // let cond_val = self.builder.build_int_compare(IntPredicate::NE, cond.into_int_value(), self.context.i32_type().const_int(0, false), "condtmp");
 
                 let if_bb = self.context.append_basic_block(self.fn_value(), "if_true");
@@ -221,6 +287,7 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
                 self.builder.position_at_end(cond_bb);
 
                 let cond = self.compile_exp(cond).into_int_value();
+                let cond = self.builder.build_int_truncate(cond, self.context.bool_type(), "cond_cast");
                 self.builder.build_conditional_branch(cond, body_bb, after_bb);
 
                 self.builder.position_at_end(body_bb);
@@ -267,8 +334,9 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
         // };
         let fn_type = match &*f.retty {
             Type::Unit => self.context.void_type().fn_type(args_types, false),
-            Type::Int => self.context.i64_type().fn_type(args_types, false),
-            Type::Bool => self.context.bool_type().fn_type(args_types, false),
+            _ => self.context.i64_type().fn_type(args_types, false),
+            // Type::Int => self.context.i64_type().fn_type(args_types, false),
+            // Type::Bool => self.context.i64_type().fn_type(args_types, false),
             t => panic!("Unsupported type: {:?}", t)
         };
 
@@ -311,7 +379,8 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
 
         for (i, arg) in function.get_param_iter().enumerate() {
             let arg_name = f.params[i].0.as_str();
-            let alloca = self.create_entry_block_alloca(arg_name);
+            let arg_type = &f.params[i].1;
+            let alloca = self.create_entry_block_alloca(arg_name, arg_type);
 
             self.builder.build_store(alloca, arg);
 
@@ -343,6 +412,10 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
         let int_arg = self.context.i64_type().fn_type(&[self.context.i64_type().into()], false);
         let int_arg_fn = self.module.add_function("int_arg", int_arg, None);
         self.functions.insert("int_arg".to_string(), int_arg_fn);
+
+        let alloc_array = self.context.i64_type().ptr_type(AddressSpace::Generic).fn_type(&[self.context.i64_type().into()], false);
+        let alloc_array_fn = self.module.add_function("alloc_array", alloc_array, None);
+        self.functions.insert("alloc_array".to_string(), alloc_array_fn);
 
         let funcdefs = self.program.0.clone();
         // Build decl map

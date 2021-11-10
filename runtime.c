@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <inttypes.h>
+#include <stdlib.h>
 
 char** argv;
 int64_t program(int64_t argc);
@@ -7,6 +8,16 @@ int64_t program(int64_t argc);
 int64_t print_int(int64_t i) {
     printf("%" PRId64 "\n", i);
     return i;
+}
+
+int64_t* alloc_array(int64_t size) {
+    int64_t* array = malloc((size + 1) * sizeof(int64_t));
+    if (array == NULL) {
+        printf("Array allocation failed!\n");
+        exit(1);
+    }
+    array[0] = size;
+    return array;
 }
 
 int64_t int_arg(int64_t i) {
