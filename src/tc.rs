@@ -505,7 +505,7 @@ impl TypeChecker {
                     None => (Type::Unit, stmt.loc),
                 };
 
-                if retty != *retty_expected && retty != Type::Unknown {
+                if retty != *retty_expected && !retty.is_unknown() {
                     let [color1, color2] = colors();
 
                     Report::build(ariadne::ReportKind::Error, &self.src_file, loc.start)
@@ -604,7 +604,7 @@ impl TypeChecker {
                         // Actually this doesn't do much, since we don't update curr_s_ty_ctx.
                         // v.set_type(t);
 
-                        if t != curr_ty && t != Type::Unknown {
+                        if t != curr_ty && !t.is_unknown() {
                             let [color_var, color1, color2] = colors();
 
                             Report::build(ariadne::ReportKind::Error, &self.src_file, e.loc.start)
@@ -683,7 +683,7 @@ impl TypeChecker {
                             }
                         };
 
-                        if idx_t != Type::Int && idx_t != Type::Unknown {
+                        if idx_t != Type::Int && !idx_t.is_unknown() {
                             let [color1, color2] = colors();
 
                             self.report("index type mismatch", idx.loc.start)
@@ -712,7 +712,7 @@ impl TypeChecker {
                             );
                         }
 
-                        if assn_t != elem_t && assn_t != Type::Unknown {
+                        if assn_t != elem_t && !assn_t.is_unknown() {
                             let [color1, color2] = colors();
 
                             self.report("index assignment type mismatch", e.loc.start)
@@ -1003,7 +1003,7 @@ impl TypeChecker {
                 let left_t = self.tc_exp(left);
                 let right_t = self.tc_exp(right);
 
-                if op_type.0 .0 != left_t && left_t != Type::Unknown {
+                if op_type.0 .0 != left_t && !left_t.is_unknown() {
                     let [color_op, color1, color2] = colors();
 
                     Report::build(ariadne::ReportKind::Error, &self.src_file, left.loc.start)
@@ -1038,7 +1038,7 @@ impl TypeChecker {
                         left.loc,
                     );
                 }
-                if op_type.0 .1 != right_t && right_t != Type::Unknown {
+                if op_type.0 .1 != right_t && !right_t.is_unknown() {
                     let [color_op, color1, color2] = colors();
 
                     Report::build(ariadne::ReportKind::Error, &self.src_file, right.loc.start)
@@ -1080,7 +1080,7 @@ impl TypeChecker {
                 let op_type = op.get_type();
                 let inner_t = self.tc_exp(inner);
 
-                if op_type.0 != inner_t && inner_t != Type::Unknown {
+                if op_type.0 != inner_t && !inner_t.is_unknown() {
                     let [color_op, color1, color2] = colors();
 
                     Report::build(ariadne::ReportKind::Error, &self.src_file, inner.loc.start)
@@ -1126,6 +1126,37 @@ impl TypeChecker {
                     col: 0,
                     line: 0,
                 };
+
+                // not allowed, must use "[0; 0]" instead
+                if els.is_empty() {
+                    let [color, color1] = colors();
+
+                    Report::build(ariadne::ReportKind::Error, &self.src_file, exp.loc.start)
+                        .with_message::<&str>("empty explicit array")
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, exp.loc.range())
+                            )
+                            .with_message("array is empty")
+                            .with_color(color1)
+                        )
+                        .with_note(
+                            format!(
+                                "use {} instead, e.g. {}",
+                                "[<value>; 0]".fg(color),
+                                "[false; 0]".fg(color),
+                            )
+                        )
+                        .finish()
+                        .print((&self.src_file, Source::from(self.src_content.clone())))
+                        .unwrap();
+
+                    self.errors.add(
+                        "empty array is not allowed".to_string(),
+                        els.loc,
+                    );
+                }
+
                 for el in els.iter_mut() {
                     let el_t = self.tc_exp(el);
                     if t == Type::Unknown {
@@ -1170,7 +1201,7 @@ impl TypeChecker {
             }
             Expr::DefaultArray { default_value, size } => {
                 let size_t = self.tc_exp(size);
-                if size_t != Type::Int && size_t != Type::Unknown {
+                if size_t != Type::Int && !size_t.is_unknown() {
                     let [color1] = colors();
 
                     self.report("array size type mismatch", size.loc.start)
@@ -1240,7 +1271,7 @@ impl TypeChecker {
                     }
                 };
 
-                if idx_t != Type::Int && idx_t != Type::Unknown {
+                if idx_t != Type::Int && !idx_t.is_unknown() {
                     let [color1, color2] = colors();
 
                     self.report("index type mismatch", idx.loc.start)
