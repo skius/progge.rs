@@ -6,9 +6,9 @@ Proggers is a program analysis playground for a simple, imperative language.
 
 - Numerical analysis using abstract interpretation
 - Type-checking
+- Compilation to native code
 - Data-flow analyses (planned)
 - Symbolic execution (planned)
-- Code generation (planned)
 
 ### Installation
 
@@ -31,6 +31,7 @@ funcdef:    fn var((var: type,)*) -> type { block }
 block:      stmt;*
 stmt:       let var = expr
             | var = expr
+            | expr[expr] = expr
             | if expr { block } [ else { block } ]
             | while expr { block }
             | return [expr]
@@ -40,10 +41,12 @@ expr:       var
             | expr binop expr
             | unop expr
             | var(expr,*)
+            | [expr,*]
+            | [expr; expr]
 binop:      + | - | * | / | % | < | <= | > | >= | == | !=
 unop:       - | !
 var:        [A-Za-z_][A-Za-z0-9_]*
-type:       int | bool
+type:       int | bool | [type]
 
 ```
 
@@ -117,3 +120,36 @@ fn foo() -> int {
 ![error message in terminal](analyzer-examples/tc_bad/return_type_mismatch.png)
 
 See [`analyzer-examples/tc_bad`](analyzer-examples/tc_bad) for more examples.
+
+
+[**Compilation**](codegen-examples/factorial.progge): Proggers can compile programs to native code.
+```shell
+$ proggers codegen-examples/factorial.progge -t -o factorial
+$ ./factorial 4
+24
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+```

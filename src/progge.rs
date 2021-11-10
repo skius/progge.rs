@@ -127,7 +127,7 @@ fn parse_args() -> Config {
     // if no sourcefile, print usage and exit
     if cfg.src_file.is_empty() {
         eprintln!("{}: error: no source file specified", executable);
-        eprintln!("usage: {} <sourcefile> [--all] [--cfg] [--typecheck] [--analyze] [--ast] [-o <output executable>]", executable);
+        eprintln!("usage: {} <sourcefile> [--all] [--cfg] [--typecheck] [--analyze] [--ast] [-o <compilation output>]", executable);
         exit(1);
     }
 
