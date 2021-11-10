@@ -1168,6 +1168,37 @@ impl TypeChecker {
                 }
                 Type::Array(Box::new(WithLoc::no_loc(t)))
             }
+            Expr::DefaultArray { default_value, size } => {
+                let size_t = self.tc_exp(size);
+                if size_t != Type::Int && size_t != Type::Unknown {
+                    let [color1] = colors();
+
+                    self.report("array size type mismatch", size.loc.start)
+                        .with_label(
+                            Label::new(
+                                (&self.src_file, size.loc.range())
+                            )
+                            .with_message(
+                                format!("array size is of type {}", size_t.to_string().fg(color1))
+                            )
+                            .with_color(color1)
+                        )
+                        .with_note(
+                            "an array's size must be an integer"
+                        )
+                        .finish()
+                        .print((&self.src_file, Source::from(self.src_content.clone())))
+                        .unwrap();
+
+                    self.errors.add(
+                        format!("array size is type `{}`, but must be an integer", size_t),
+                        size.loc,
+                    );
+                }
+
+                let default_value_t = self.tc_exp(default_value);
+                Type::Array(Box::new(WithLoc::no_loc(default_value_t)))
+            }
             Expr::Index(arr, idx) => {
                 let arr_t = self.tc_exp(arr);
                 let idx_t = self.tc_exp(idx);
@@ -1292,7 +1323,8 @@ pub fn type_of(e: &Expr) -> Type {
         Expr::UnOp(WithLoc { elem: Neg, .. }, _) => Int,
         Expr::UnOp(WithLoc { elem: Not, .. }, _) => Bool,
         // TODO: fix? Also, do we need a type array initializer? [] is ambiguous otherwise
-        Expr::Array(WithLoc { elem: _, loc, .. }) => Array(Box::new(WithLoc::new(Int, loc.clone()))),
+        Expr::Array(WithLoc { elem: _, loc, .. }) => Array(Box::new(WithLoc::new(Unknown, loc.clone()))),
+        Expr::DefaultArray { default_value, size } => Array(Box::new(WithLoc::new(Unknown, default_value.loc.clone()))),
         Expr::Index(arr, idx) => Unknown,
     }
 }

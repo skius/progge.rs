@@ -283,10 +283,10 @@ pub enum Expr {
     BinOp(WithLoc<BinOpcode>, Box<WithLoc<Expr>>, Box<WithLoc<Expr>>),
     UnOp(WithLoc<UnOpcode>, Box<WithLoc<Expr>>),
     Array(WithLoc<Vec<WithLoc<Expr>>>),
-    // DefaultArray {
-    //     default_value: Box<WithLoc<Expr>>,
-    //     size: Box<WithLoc<Expr>>,
-    // },
+    DefaultArray {
+        default_value: Box<WithLoc<Expr>>,
+        size: Box<WithLoc<Expr>>,
+    },
     Index(Box<WithLoc<Expr>>, Box<WithLoc<Expr>>),
     // Int(WithLoc<IntExpr>),
     // Bool(WithLoc<BoolExpr>),
@@ -328,7 +328,12 @@ impl Expr {
                 let mut fv = arr.free_vars();
                 fv.extend(idx.free_vars());
                 fv
-            }
+            },
+            DefaultArray { default_value, size } => {
+                let mut fv = size.free_vars();
+                fv.extend(default_value.free_vars());
+                fv
+            },
         }
     }
 
@@ -342,6 +347,9 @@ impl Expr {
             Expr::UnOp(_, inner) => inner.contains_bool_var(),
             Expr::Array(elems) => elems.iter().any(|e| e.contains_bool_var()),
             Expr::Index(arr, idx) => arr.contains_bool_var() || idx.contains_bool_var(),
+            Expr::DefaultArray { default_value, size } => {
+                default_value.contains_bool_var() || size.contains_bool_var()
+            },
         }
     }
 }
@@ -362,6 +370,9 @@ impl Display for Expr {
             Array(elems) => f.write_str(&format!("[{}]", sep_string_display(elems, ", "))),
             // TODO: risky that we're leaving out () around `arr`, but works because currently arr can only be a leaf expr
             Index(arr, idx) => f.write_str(&format!("{}[{}]", arr, idx)),
+            DefaultArray { default_value, size } => {
+                f.write_str(&format!("[{}; {}]", default_value, size))
+            }
         }
     }
 }
