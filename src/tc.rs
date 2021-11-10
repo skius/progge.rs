@@ -908,10 +908,10 @@ impl TypeChecker {
             }
             Expr::Call(name, args) => {
                 // TODO: Typecheck that function exists
-                let (_, param_tys, retty) = &self.f_ty_ctx[name.as_str()];
+                let (_, params, retty) = &self.f_ty_ctx[name.as_str()];
                 let retty = (**retty).clone();
 
-                let params_len = param_tys.len();
+                let params_len = params.len();
                 let args_len = args.len();
 
                 if params_len != args_len {
@@ -930,7 +930,7 @@ impl TypeChecker {
                         )
                         .with_label(
                             Label::new(
-                                (&self.src_file, param_tys.loc.start..param_tys.loc.end)
+                                (&self.src_file, params.loc.start..params.loc.end)
                             )
                                 .with_message(
                                     format!("function {} has {} parameters", name.as_str().fg(color_name), params_len.to_string().fg(color2))
@@ -950,9 +950,9 @@ impl TypeChecker {
                     );
                 }
 
-                let param_tys = param_tys.iter().map(|p| p.1.clone()).collect::<Vec<_>>();
+                // let param_tys = params.iter().map(|p| p.1.clone()).collect::<Vec<_>>();
 
-                param_tys.into_iter().zip(args.iter_mut()).for_each(|(param_t, arg)| {
+                params.elem.clone().into_iter().zip(args.iter_mut()).for_each(|((param_v, param_t), arg)| {
                     let arg_t = self.tc_exp(arg);
 
                     if arg_t != *param_t {
@@ -970,7 +970,7 @@ impl TypeChecker {
                         )
                         .with_label(
                             Label::new(
-                                (&self.src_file, param_t.loc.start..param_t.loc.end)
+                                (&self.src_file, param_v.loc.start..param_t.loc.end)
                             )
                             .with_message(
                                 format!("this parameter has type {}", param_t.elem.to_string().fg(b))
