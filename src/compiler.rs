@@ -10,6 +10,7 @@ use inkwell::values::{InstructionOpcode, BasicValue, BasicMetadataValueEnum, Flo
 use inkwell::{OptimizationLevel, FloatPredicate, IntPredicate, AddressSpace};
 use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine};
 use crate::ast::{BinOpcode, Block, Expr, FuncDef, LocExpr, Program, Stmt, Type, UnOpcode, Var, WithLoc};
+use crate::tc::BUILTINS;
 
 
 pub struct Compiler<'a, 'ctx> {
@@ -273,7 +274,15 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
                 self.builder.build_store(ptr, val.into_int_value());
             },
             Stmt::Call(name, args) => {
-                let call_res = self.compile_call(name, args);
+                if let Some(builtin) = BUILTINS.get(name.as_str()) {
+                    if builtin.has_implementation {
+                        let call_res = self.compile_call(name, args);
+                    } else {
+                        // If it has no implementation, we can ignore compiling this.
+                    }
+                } else {
+                    let call_res = self.compile_call(name, args);
+                }
 
             }
             Stmt::IfElse { cond, if_branch, else_branch } => {

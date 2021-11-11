@@ -6,6 +6,7 @@ use std::fmt::{Display, Formatter};
 use std::ops::{Deref, Range};
 use std::rc::{Rc, Weak};
 use ariadne::{Color, ColorGenerator, Fmt, Label, Report, ReportBuilder, Source};
+use lazy_static::lazy_static;
 use petgraph::graph::DiGraph;
 
 use crate::ast::*;
@@ -150,7 +151,36 @@ impl ScopedTypeContext {
     // pub fn graphviz(self: &Rc<ScopedTypeContext>) -> String {}
 }
 
-pub struct FuncTypeContext(HashMap<String, (WithLoc<String>, WithLoc<Vec<Param>>, WithLoc<Type>)>);
+pub struct BuiltinType {
+    pub param_tys: Vec<Type>,
+    pub retty: Type,
+    // determines if the call is ignored in compilation
+    pub has_implementation: bool,
+}
+
+impl BuiltinType {
+    pub fn new(params: Vec<Type>, ret: Type, has_impl: bool) -> BuiltinType {
+        BuiltinType {
+            param_tys: params,
+            retty: ret,
+            has_implementation: has_impl,
+        }
+    }
+}
+
+lazy_static! {
+    pub static ref BUILTINS: HashMap<&'static str, BuiltinType> = {
+        let mut m = HashMap::new();
+        m.insert("print_int", BuiltinType::new(vec![Type::Int], Type::Int, true));
+        m.insert("int_arg", BuiltinType::new(vec![Type::Int], Type::Int, true));
+        m.insert("analyze!", BuiltinType::new(vec![Type::Any], Type::Unit, false));
+        m
+    };
+}
+
+type FuncType = (WithLoc<String>, WithLoc<Vec<Param>>, WithLoc<Type>);
+
+pub struct FuncTypeContext(HashMap<String, FuncType>);
 
 impl<P: Borrow<Program>> From<P> for FuncTypeContext {
     fn from(p: P) -> Self {
@@ -165,15 +195,24 @@ impl<P: Borrow<Program>> From<P> for FuncTypeContext {
 
         // TODO: maybe add "external" bool to value, then we can do better error reporting
         // Built-ins
-        map.insert("print_int".to_string(), (
-            WithLoc::no_loc("print_int".to_string()),
-            WithLoc::no_loc(vec![(WithLoc::no_loc(Var("i".to_string(), Type::Int)), WithLoc::no_loc(Type::Int))]),
-            WithLoc::no_loc(Type::Int)));
+        // map.insert("print_int".to_string(), (
+        //     WithLoc::no_loc("print_int".to_string()),
+        //     WithLoc::no_loc(vec![(WithLoc::no_loc(Var("i".to_string(), Type::Int)), WithLoc::no_loc(Type::Int))]),
+        //     WithLoc::no_loc(Type::Int)));
+        //
+        // map.insert("int_arg".to_string(), (
+        //     WithLoc::no_loc("int_arg".to_string()),
+        //     WithLoc::no_loc(vec![(WithLoc::no_loc(Var("i".to_string(), Type::Int)), WithLoc::no_loc(Type::Int))]),
+        //     WithLoc::no_loc(Type::Int)));
 
-        map.insert("int_arg".to_string(), (
-            WithLoc::no_loc("int_arg".to_string()),
-            WithLoc::no_loc(vec![(WithLoc::no_loc(Var("i".to_string(), Type::Int)), WithLoc::no_loc(Type::Int))]),
-            WithLoc::no_loc(Type::Int)));
+        for (name, BuiltinType { param_tys, retty, ..}) in BUILTINS.iter() {
+            map.insert(name.to_string(), (
+                WithLoc::no_loc(name.to_string()),
+                WithLoc::no_loc(param_tys.iter().map(|param_ty| {
+                    (WithLoc::no_loc(Var(param_ty.to_string(), param_ty.clone())), WithLoc::no_loc(param_ty.clone()))
+                }).collect()),
+                WithLoc::no_loc(retty.clone())));
+        }
 
         FuncTypeContext(map)
     }
@@ -1275,7 +1314,7 @@ impl TypeChecker {
         params.elem.clone().into_iter().zip(args.iter_mut()).for_each(|((param_v, param_t), arg)| {
             let arg_t = self.tc_exp(arg);
 
-            if arg_t != *param_t {
+            if arg_t != *param_t && !arg_t.is_unknown() && !param_t.is_any() {
                 let [a, b] = colors();
 
                 self.report("argument type mismatch", arg.loc.start)

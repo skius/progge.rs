@@ -1,0 +1,12 @@
+fn program() -> int {
+    analyze(2);
+    return 0;
+}
+
+fn analyze(x: int) {
+    let y = x * 2;
+    if x + y < 9 {
+        analyze!(x / 3);
+    }
+    return;
+}

@@ -1,0 +1,16 @@
+fn analyze() -> int {
+    let arr = [1, 2, 3];
+    let x = arr[0];
+    if x == 1 {
+        return -1;
+    }
+    if x == 3 {
+        // not taken, but the analyzer might issue a false positive
+        return -2;
+    }
+    if x == 4 {
+        // not taken, and the analyzer should see that
+        return -3;
+    }
+    return 0;
+}

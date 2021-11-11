@@ -507,6 +507,7 @@ pub enum Type {
     Bool,
     Unit,
     Unknown,
+    Any,
     Array(Box<WithLoc<Type>>),
 }
 
@@ -515,6 +516,13 @@ impl Type {
         match self {
             Type::Unknown => true,
             Type::Array(t) => t.is_unknown(),
+            _ => false,
+        }
+    }
+
+    pub fn is_any(&self) -> bool {
+        match self {
+            Type::Any => true,
             _ => false,
         }
     }
@@ -556,6 +564,7 @@ impl Display for Type {
             Int => f.write_str("int"),
             Bool => f.write_str("bool"),
             Unit => f.write_str("unit"),
+            Any => f.write_str("any"),
             Array(inner) => f.write_str(&format!("[{}]", inner)),
             Unknown => f.write_str("_unknown_"),
         }
