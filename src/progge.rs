@@ -10,6 +10,7 @@ use proggers::ast::*;
 use proggers::ir::IntraProcCFG;
 
 use proggers::tc::{FuncTypeContext, TcError, TypeChecker, VariableTypeContext};
+use crate::Color::Cyan;
 
 lalrpop_mod!(pub progge); // synthesized by LALRPOP
 
@@ -54,10 +55,10 @@ fn main() -> Result<(), TcError> {
         let ai_env = proggers::ai::run(&analyze);
         println!("{}", ai_env.graphviz());
 
-        let mut keys = ai_env.saved_states.keys().collect::<Vec<_>>();
+        let mut saved_states_keys = ai_env.saved_states.keys().collect::<Vec<_>>();
 
-        keys.sort_by_key(|l| l.start);
-        for loc in keys {
+        saved_states_keys.sort_by_key(|l| l.start);
+        for loc in saved_states_keys {
             let (bound, state) = &ai_env.saved_states[loc];
             if bound.0 > bound.1 {
                 // Unreachable
@@ -89,6 +90,31 @@ fn main() -> Result<(), TcError> {
                                 )
                             )
                             .with_color(Color::Cyan)
+                    )
+                    .finish()
+                    .print((src_file, Source::from(src.clone())))
+                    .unwrap();
+            }
+        }
+
+        let mut unreachable_states_keys = ai_env.unreachable_states.keys().collect::<Vec<_>>();
+        unreachable_states_keys.sort_by_key(|l| l.start);
+        for loc in unreachable_states_keys {
+            // TODO: once symbolic execution is added, add possible cases that reach this statement
+            let state = &ai_env.unreachable_states[loc];
+            if !state.is_bottom(&ai_env.man) {
+                Report::build(ariadne::ReportKind::Error, src_file, loc.start)
+                    .with_label(
+                        Label::new(
+                            (src_file, loc.range())
+                        )
+                            .with_message(
+                                format!(
+                                    "statement is reachable - state is {}",
+                                    state.to_string(&ai_env.man, &ai_env.env).fg(Color::Cyan)
+                                )
+                            )
+                            .with_color(Color::Red)
                     )
                     .finish()
                     .print((src_file, Source::from(src.clone())))

@@ -1,0 +1,14 @@
+fn analyze(x: int, y: int) {
+    let i = 0;
+    if x < y {
+        i = 1;
+    }
+    if x > y {
+        i = -1;
+    }
+    if i == 0 {
+        unreachable!;
+    }
+
+    return;
+}

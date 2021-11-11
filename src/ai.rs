@@ -7,7 +7,7 @@ use petgraph::prelude::Dfs;
 use petgraph::visit::EdgeRef;
 use petgraph::Direction::{Incoming, Outgoing};
 
-use crate::ast::{BinOpcode, Loc, Type, Var};
+use crate::ast::{BinOpcode, Loc, loc_from_offset, Type, Var};
 use crate::ast::{LocExpr, Expr, UnOpcode, WithLoc};
 use crate::ir::{IREdge, IRNode, IntraProcCFG};
 use crate::ir::IRNode::IRReturn;
@@ -24,6 +24,8 @@ pub struct AbstractInterpretationEnvironment<'a, M: Manager> {
     pub edge_state_map: HashMap<EdgeIndex, Abstract>,
     // bounds in points of interest, e.g. analyze! calls
     pub saved_states: HashMap<Loc, (Interval, Abstract)>,
+    // states for unreachable!
+    pub unreachable_states: HashMap<Loc, Abstract>,
     pub cfg: &'a IntraProcCFG,
 }
 
@@ -158,15 +160,13 @@ pub fn run(cfg: &IntraProcCFG) -> AbstractInterpretationEnvironment<impl Manager
     let man = OptPkManager::default();
     let env = env_from_cfg(cfg);
 
-    let edge_state_map = HashMap::new();
-    let saved_states: HashMap<Loc, (Interval, Abstract)> = HashMap::new();
-    
     let mut res = AbstractInterpretationEnvironment {
-        man: man,
+        man,
         env,
-        edge_state_map: edge_state_map,
-        saved_states: saved_states,
-        cfg
+        edge_state_map: HashMap::new(),
+        saved_states: HashMap::new(),
+        unreachable_states: HashMap::new(),
+        cfg,
     };
 
     // TODO: enforce .run() better? maybe make AIE::run() private and keep ai::run() public?
@@ -249,7 +249,7 @@ impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
 
             // Need to compute outgoing state
             let curr_irnode = self.cfg.graph[curr_node].clone();
-            let taken_state = handle_irnode(man, env, &curr_irnode, &mut curr_state, &mut self.saved_states);
+            let taken_state = handle_irnode(man, env, &curr_irnode, &mut curr_state, &mut self.saved_states, &mut self.unreachable_states);
 
             let outgoing_edges = self.cfg.graph
                 .edges_directed(curr_node, Outgoing)
@@ -287,19 +287,20 @@ impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
 
 }
 
-fn handle_irnode(
-    man: &impl Manager,
+fn handle_irnode<M: Manager>(
+    man: &M,
     env: &Environment,
     ir: &IRNode,
     state: &mut Abstract,
     saved_states: &mut HashMap<Loc, (Interval, Abstract)>,
+    unreachable_states: &mut HashMap<Loc, Abstract>,
 ) -> Option<Abstract> {
     use IRNode::*;
 
     // TODO: in Decl/Assn cases check that we are assigning int variable, otherwise skip
     match ir {
         // "true" constraint
-        IRTestcase | IRUnreachable | IRSkip | IRBranch => None,
+        IRTestcase | IRSkip | IRBranch => None,
         IRDecl(v, e) => {
             if !v.is_int() {
                 // Only handling ints so far
@@ -325,6 +326,16 @@ fn handle_irnode(
             // TODO: handle arrays in AI
             None
         }
+        IRUnreachable => {
+            unreachable_states.insert(Loc {
+                line: 0,
+                col: 0,
+                start: 0,
+                end: 0
+            }, state.clone());
+            
+            None
+        }
         IRCall(name, args) => {
             // Can ignore calls for now, but they can change state, namely when we pass arrays, which are by-reference
             // TODO: Also need to handle special functions like analyze!
@@ -340,7 +351,7 @@ fn handle_irnode(
             // TODO: Handle return better. How?
             // TODO: make this not panic if retty not int. need to track return type of analyzed function
             let v = Var(RETURN_VAR.to_string(), Type::Int);
-            handle_irnode(man, env, &IRAssn(LocExpr::Var(WithLoc::no_loc(v)), e.clone()), state, saved_states)
+            handle_irnode(man, env, &IRAssn(LocExpr::Var(WithLoc::no_loc(v)), e.clone()), state, saved_states, unreachable_states)
         }
         IRReturn(None) => {
             // unhandled
