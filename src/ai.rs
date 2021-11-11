@@ -23,7 +23,7 @@ pub struct AbstractInterpretationEnvironment<'a, M: Manager> {
     pub env: Environment,
     pub edge_state_map: HashMap<EdgeIndex, Abstract>,
     // bounds in points of interest, e.g. analyze! calls
-    pub saved_states: HashMap<Loc, Interval>,
+    pub saved_states: HashMap<Loc, (Interval, Abstract)>,
     pub cfg: &'a IntraProcCFG,
 }
 
@@ -159,7 +159,7 @@ pub fn run(cfg: &IntraProcCFG) -> AbstractInterpretationEnvironment<impl Manager
     let env = env_from_cfg(cfg);
 
     let edge_state_map = HashMap::new();
-    let saved_states: HashMap<Loc, Interval> = HashMap::new();
+    let saved_states: HashMap<Loc, (Interval, Abstract)> = HashMap::new();
     
     let mut res = AbstractInterpretationEnvironment {
         man: man,
@@ -292,7 +292,7 @@ fn handle_irnode(
     env: &Environment,
     ir: &IRNode,
     state: &mut Abstract,
-    saved_states: &mut HashMap<Loc, Interval>,
+    saved_states: &mut HashMap<Loc, (Interval, Abstract)>,
 ) -> Option<Abstract> {
     use IRNode::*;
 
@@ -332,7 +332,7 @@ fn handle_irnode(
                 let arg = &args[0];
                 let arg_texpr = int_expr_to_texpr(env, arg);
                 let bounds = state.get_bounds_texpr(man, &arg_texpr);
-                saved_states.insert(args.loc, bounds);
+                saved_states.insert(args.loc, (bounds, state.clone()));
             }
             None
         }

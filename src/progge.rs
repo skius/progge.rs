@@ -54,7 +54,11 @@ fn main() -> Result<(), TcError> {
         let ai_env = proggers::ai::run(&analyze);
         println!("{}", ai_env.graphviz());
 
-        for (loc, bound) in ai_env.saved_states.iter() {
+        let mut keys = ai_env.saved_states.keys().collect::<Vec<_>>();
+
+        keys.sort_by_key(|l| l.start);
+        for loc in keys {
+            let (bound, state) = &ai_env.saved_states[loc];
             if bound.0 > bound.1 {
                 // Unreachable
                 Report::build(ariadne::ReportKind::Warning, src_file, loc.start)
@@ -79,8 +83,9 @@ fn main() -> Result<(), TcError> {
                         )
                             .with_message(
                                 format!(
-                                    "expression may assume at most the values: {}",
-                                    format!("{:?}", bound).fg(Color::Cyan)
+                                    "expression may assume at most the values {} - state is {}",
+                                    format!("{:?}", bound).fg(Color::Cyan),
+                                    format!("{}", state.to_string(&ai_env.man, &ai_env.env)).fg(Color::Cyan),
                                 )
                             )
                             .with_color(Color::Cyan)

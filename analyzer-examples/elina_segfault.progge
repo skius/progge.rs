@@ -1,0 +1,24 @@
+fn analyze(x: int) {
+    let i = 0;
+
+    while i < x {
+        i = i + 1;
+    }
+
+    /*
+    SEGFAULT with the following:
+
+    if x >= 0 && x <= 10 {
+        analyze!(x);
+        let i = 5;
+        analyze!(i * x);
+    }
+    */
+
+    if x >= 0 && x <= 10 {
+        analyze!(x);
+        let i = 5;
+        analyze!(i * x);
+    }
+    return;
+}

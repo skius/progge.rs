@@ -1,0 +1,23 @@
+fn analyze(x: int) {
+    let i = 0;
+    while i < x {
+        analyze!(i);
+
+        if i < 0 {
+            analyze!(i + 100); // unreachable
+        }
+
+        i = i + 1;
+    }
+
+    if x >= 0 && x <= 10 {
+        analyze!(x);
+        let i = 5;
+        analyze!(i * x);
+    }
+
+    // not able to deduce x*x >= 0
+    analyze!(x * x);
+
+    return;
+}
