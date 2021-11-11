@@ -21,7 +21,16 @@ into a crate feature. Please, feel free to contribute!*
 Once the prerequisites are installed, you can install Proggers with: `cargo install --git https://github.com/skius/progge.rs`
 
 ### Usage
-Run `proggers` to print the usage information.
+```
+proggers
+  <sourcefile>        # the sourcefile to analyze
+  --cfg               # visualize the control flow graph
+  --typecheck         # type-check the source
+  --analyze           # run the abstract interpreter over the source
+  --ast               # print the abstract syntax tree
+  -o <outputfile>     # compile source into the executable <outputfile>
+  --verbose           # print LLVM IR when compiling
+```
 
 ## Progge
 
