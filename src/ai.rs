@@ -7,7 +7,7 @@ use petgraph::prelude::Dfs;
 use petgraph::visit::EdgeRef;
 use petgraph::Direction::{Incoming, Outgoing};
 
-use crate::ast::{BinOpcode, Loc, loc_from_offset, Type, Var};
+use crate::ast::{BinOpcode, Loc, Type, Var};
 use crate::ast::{LocExpr, Expr, UnOpcode, WithLoc};
 use crate::ir::{IREdge, IRNode, IntraProcCFG};
 use crate::ir::IRNode::IRReturn;

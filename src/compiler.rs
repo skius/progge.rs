@@ -1,13 +1,12 @@
-use std::arch::x86_64::_mm256_undefined_pd;
 use std::collections::HashMap;
 use std::process::Command;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::passes::PassManager;
-use inkwell::types::{AnyType, BasicMetadataTypeEnum, BasicTypeEnum};
-use inkwell::values::{InstructionOpcode, BasicValue, BasicMetadataValueEnum, FloatValue, IntValue, FunctionValue, PointerValue, BasicValueEnum, AnyValue, AnyValueEnum, CallSiteValue};
-use inkwell::{OptimizationLevel, FloatPredicate, IntPredicate, AddressSpace};
+use inkwell::types::{BasicMetadataTypeEnum};
+use inkwell::values::{BasicValue, IntValue, FunctionValue, PointerValue, BasicValueEnum, CallSiteValue};
+use inkwell::{OptimizationLevel, IntPredicate, AddressSpace};
 use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine};
 use crate::ast::{BinOpcode, Block, Expr, FuncDef, LocExpr, Program, Stmt, Type, UnOpcode, Var, WithLoc};
 use crate::tc::BUILTINS;
@@ -28,12 +27,6 @@ pub struct Compiler<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> Compiler<'a, 'ctx> {
-    /// Gets a defined function given its name.
-    #[inline]
-    fn get_function(&self, name: &str) -> Option<FunctionValue<'ctx>> {
-        self.module.get_function(name)
-    }
-
     /// Returns the `FunctionValue` representing the function being compiled.
     #[inline]
     fn fn_value(&self) -> FunctionValue<'ctx> {
@@ -41,7 +34,7 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
     }
 
     /// Creates a new stack allocation instruction in the entry block of the function.
-    fn create_entry_block_alloca(&self, name: &str, t: &Type) -> PointerValue<'ctx> {
+    fn create_entry_block_alloca(&self, name: &str) -> PointerValue<'ctx> {
         let builder = self.context.create_builder();
 
         let entry = self.fn_value().get_first_basic_block().unwrap();
@@ -51,24 +44,10 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
             None => builder.position_at_end(entry)
         }
 
-        // match t {
-        //     Type::Int | Type::Array(_) => builder.build_alloca(self.context.i64_type(), name),
-        //     Type::Bool => builder.build_alloca(self.context.bool_type(), name),
-        //     // Type::Array(_) => builder.build_alloca(self.context.i64_type().ptr_type(AddressSpace::Generic), name),
-        //     t => panic!("Unsupported type: {:?}", t),
-        // }
-
         builder.build_alloca(self.context.i64_type(), name)
     }
 
-    fn compile_ty(&mut self, t: &Type) -> BasicMetadataTypeEnum<'ctx> {
-        // match t {
-        //     Type::Int => self.context.i64_type().into(),
-        //     Type::Bool => self.context.bool_type().into(),
-        //     // TODO: handle Unit in Typechecker?
-        //     // Type::Unit => self.context.void_type().into(),
-        //     _ => panic!("Unsupported type: {:?}", t)
-        // }
+    fn compile_ty(&mut self) -> BasicMetadataTypeEnum<'ctx> {
         self.context.i64_type().into()
     }
 
@@ -99,11 +78,6 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
                 *self.variables.get(&v.elem).unwrap()
             }
             LocExpr::Index(arr, idx) => {
-                let arr_t = match &arr.typ {
-                    Type::Array(t) => t.clone(),
-                    _ => panic!("Expected array type")
-                };
-
                 let arr_ptr = self.compile_exp(arr);
                 let arr_ptr = self.builder.build_int_to_ptr(arr_ptr.into_int_value(), self.context.i64_type().ptr_type(AddressSpace::Generic), "arr_ptr");
                 let idx = self.compile_exp(idx);
@@ -247,7 +221,6 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
                 let ptr = self.compile_loc_exp(&WithLoc::new(LocExpr::Index((**arr).clone(), (**idx).clone()), exp.loc));
                 self.builder.build_load(ptr, "arr_idx_load").into()
             }
-            e => panic!("Unsupported expression: {:?}", e)
         }
     }
 
@@ -263,7 +236,7 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
             Stmt::Decl(v, e) => {
                 let val = self.compile_exp(e);
 
-                let alloca = self.create_entry_block_alloca(v.as_str(), &e.typ);
+                let alloca = self.create_entry_block_alloca(v.as_str());
                 self.builder.build_store(alloca, val);
 
                 self.variables.insert(v.elem.clone(), alloca);
@@ -276,12 +249,12 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
             Stmt::Call(name, args) => {
                 if let Some(builtin) = BUILTINS.get(name.as_str()) {
                     if builtin.has_implementation {
-                        let call_res = self.compile_call(name, args);
+                        self.compile_call(name, args);
                     } else {
                         // If it has no implementation, we can ignore compiling this.
                     }
                 } else {
-                    let call_res = self.compile_call(name, args);
+                    self.compile_call(name, args);
                 }
 
             }
@@ -352,8 +325,8 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
 
     fn compile_fndef(&mut self, f: &FuncDef) -> FunctionValue<'ctx> {
         let args_types = f.params.iter()
-            .map(|(_, t)| {
-                self.compile_ty(t)
+            .map(|_| {
+                self.compile_ty()
             })
             .collect::<Vec<BasicMetadataTypeEnum>>();
         let args_types = args_types.as_slice();
@@ -366,7 +339,7 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
         // };
         let fn_type = match &*f.retty {
             Type::Unit => self.context.void_type().fn_type(args_types, false),
-            _ => self.context.i64_type().fn_type(args_types, false),
+            Type::Int | Type::Bool | Type::Array(_) => self.context.i64_type().fn_type(args_types, false),
             // Type::Int => self.context.i64_type().fn_type(args_types, false),
             // Type::Bool => self.context.i64_type().fn_type(args_types, false),
             t => panic!("Unsupported type: {:?}", t)
@@ -411,8 +384,7 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
 
         for (i, arg) in function.get_param_iter().enumerate() {
             let arg_name = f.params[i].0.as_str();
-            let arg_type = &f.params[i].1;
-            let alloca = self.create_entry_block_alloca(arg_name, arg_type);
+            let alloca = self.create_entry_block_alloca(arg_name);
 
             self.builder.build_store(alloca, arg);
 

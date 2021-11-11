@@ -10,7 +10,6 @@ use proggers::ast::*;
 use proggers::ir::IntraProcCFG;
 
 use proggers::tc::{FuncTypeContext, TcError, TypeChecker, VariableTypeContext};
-use crate::Color::Cyan;
 
 lalrpop_mod!(pub progge); // synthesized by LALRPOP
 

@@ -1,4 +1,4 @@
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::{Borrow};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -7,7 +7,6 @@ use std::ops::{Deref, Range};
 use std::rc::{Rc, Weak};
 use ariadne::{Color, ColorGenerator, Fmt, Label, Report, ReportBuilder, Source};
 use lazy_static::lazy_static;
-use petgraph::graph::DiGraph;
 
 use crate::ast::*;
 
@@ -315,7 +314,8 @@ pub struct TypeChecker {
     src_content: String,
     errors: TcError,
     curr_s_ty_ctx: Rc<ScopedTypeContext>,
-    root_s_ty_ctx: Rc<ScopedTypeContext>,
+    // Needed because otherwise the tree would be dropped due to Weak backreferences
+    _root_s_ty_ctx: Rc<ScopedTypeContext>,
 }
 
 impl TypeChecker {
@@ -327,7 +327,7 @@ impl TypeChecker {
             src_content: src,
             errors: TcError(vec![]),
             curr_s_ty_ctx: s_ty_ctx.clone(),
-            root_s_ty_ctx: s_ty_ctx,
+            _root_s_ty_ctx: s_ty_ctx,
         }
     }
 
@@ -494,7 +494,7 @@ impl TypeChecker {
                     fdef.loc,
                 )
             },
-            Some(t) => {
+            Some(_) => {
                 // I don't think we need this, return handles this already
                 // if t != *fdef.retty {
                 //     self.errors.add(
@@ -1405,8 +1405,8 @@ pub fn type_of(e: &Expr) -> Type {
         Expr::UnOp(WithLoc { elem: Not, .. }, _) => Bool,
         // TODO: fix? Also, do we need a type array initializer? [] is ambiguous otherwise
         Expr::Array(WithLoc { elem: _, loc, .. }) => Array(Box::new(WithLoc::new(Unknown, loc.clone()))),
-        Expr::DefaultArray { default_value, size } => Array(Box::new(WithLoc::new(Unknown, default_value.loc.clone()))),
-        Expr::Index(arr, idx) => Unknown,
+        Expr::DefaultArray { default_value, .. } => Array(Box::new(WithLoc::new(Unknown, default_value.loc.clone()))),
+        Expr::Index(_, _) => Unknown,
     }
 }
 

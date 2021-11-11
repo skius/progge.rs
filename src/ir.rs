@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
-use std::rc::Rc;
 
 use petgraph::dot::Dot;
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -10,7 +9,6 @@ use IREdge::*;
 use IRNode::*;
 
 use crate::ast::*;
-use crate::tc::ScopedTypeContext;
 
 pub struct IntraProcCFG {
     pub graph: IntraGraph,
@@ -229,95 +227,6 @@ impl From<&FuncDef> for IntraProcCFG {
         res
     }
 }
-
-pub fn normalize_prog(mut prog: Program, mut scope: Rc<ScopedTypeContext>) -> Program {
-    // I need to know where each scope is
-
-    prog
-}
-
-// fn add_to_new(old_graph: &IntraGraph, graph: &mut IntraGraph, old_to_new: &mut HashMap<NodeIndex, NodeIndex>, old_idx: NodeIndex) -> NodeIndex {
-//     let new_idx = if !old_to_new.contains_key(&old_idx) {
-//         let new_neighbor = graph.add_node(old_graph[old_idx].clone());
-//         old_to_new.insert(old_idx, new_neighbor);
-//         new_neighbor
-//     } else {
-//         old_to_new[&old_idx]
-//     };
-//     new_idx
-// }
-//
-// pub fn remove_unnecessary_skips(cfg: &IntraProcCFG) -> IntraProcCFG {
-//     let mut graph = IntraGraph::new();
-//     let old_graph = &cfg.graph;
-//     let mut old_to_new: HashMap<NodeIndex, NodeIndex> = HashMap::new();
-//
-//     let mut succs_of_old = |idx: NodeIndex| {
-//         // I think IRSkip can only have one successor by construction
-//         let outgoing_neighbors = old_graph.neighbors_directed(idx, Outgoing);
-//         let outgoing_neighbors = outgoing_neighbors.collect::<Vec<_>>();
-//         // assert_eq!(outgoing_neighbors.len(), 1);
-//         // let succ = outgoing_neighbors[0];
-//         // succ
-//         outgoing_neighbors
-//     };
-//
-//     // let mut add_to_new = |old_idx: NodeIndex| {
-//     //
-//     // };
-//
-//     for node_idx in old_graph.node_indices() {
-//         let node = &old_graph[node_idx];
-//         if let IRSkip = node {
-//             let succs = succs_of_old(node_idx);
-//             if succs.len() == 0 {
-//                 // if incoming edge is fallthrough we can delete, only branch must be kept
-//                 continue;
-//             } else if succs.len() > 1 {
-//                 assert!(false);
-//             }
-//             let succ = succs[0];
-//
-//             let incoming_neighbors = old_graph.neighbors_directed(node_idx, Incoming);
-//             for neighbor in incoming_neighbors {
-//                 let edges = old_graph.edges_connecting(neighbor, node_idx);
-//                 let edges: Vec<_> = edges.collect();
-//                 let edge = edges[0];
-//                 let edge = *edge.weight();
-//
-//                 // let new_neighbor = if !old_to_new.contains_key(&neighbor) {
-//                 //     let new_neighbor = graph.add_node(old_graph[neighbor].clone());
-//                 //     old_to_new.insert(neighbor, new_neighbor);
-//                 //     new_neighbor
-//                 // } else {
-//                 //     old_to_new[neighbor]
-//                 // };
-//                 let new_neighbor = add_to_new(&old_graph, &mut graph, &mut old_to_new, neighbor);
-//                 let new_succ = add_to_new(&old_graph, &mut graph, &mut old_to_new, succ);
-//
-//                 graph.add_edge(new_neighbor, new_succ, edge);
-//             }
-//         } else {
-//             // Not IRSkip
-//             let new_idx = add_to_new(&old_graph, &mut graph, &mut old_to_new, node_idx);
-//
-//             let inc_neighbors = old_graph.neighbors_directed(node_idx, Incoming);
-//             for neighbor in inc_neighbors {
-//                 let edge = old_graph.edges_connecting(neighbor, node_idx).collect::<Vec<_>>()[0];
-//                 let edge = *edge.weight();
-//
-//                 let new_neighbor = add_to_new(&old_graph, &mut graph, &mut old_to_new, neighbor);
-//                 graph.add_edge(new_neighbor, new_idx, edge);
-//             }
-//         }
-//     }
-//
-//     IntraProcCFG {
-//         graph,
-//         entry: cfg.entry,
-//         params: cfg.params.clone(),
-//     }
-// }
 
 impl IntraProcCFG {
     pub fn graphviz(&self) -> String {
