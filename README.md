@@ -73,11 +73,26 @@ fn analyze(x: int, y: int) -> int {
 ```
 ![numerical analysis CFG](analyzer-examples/numerical.png)
 
-Proggers also supports `analyze!` directives, which explicitly print possible values for a given expression.
-[For example](analyzer-examples/analyze_loop.progge), running `proggers --typecheck --analyze analyzer-examples/analyze_loop.progge` 
+Proggers also supports a few directives that make use of the abstract interpretation results.
+
+[**analyze!**](analyzer-examples/analyze_loop.progge): Explicitly prints possible values for a given expression.
+For example, running `proggers --typecheck --analyze analyzer-examples/analyze_loop.progge` 
 gives the following feedback (image does not show the full output):
 
+*Note that the returned possible values for an expression are an **over-approximation**.*
+
 ![analyze! feedback](analyzer-examples/analyze_loop.png)
+
+[**unreachable!**](analyzer-examples/unreachable.progge): Asserts that a statement is unreachable.
+For example, running `proggers --typecheck --analyze analyzer-examples/unreachable.progge`
+gives the following feedback:
+
+*Note that again, unreachability analysis using abstract interpretation computes an **over-approximation** - that is
+it may give false positives (warn about reachable `unreachable!` statements that are in truth unreachable), but may never give false negatives
+(if there are no warnings about a `unreachable!`, then it is guaranteed that the statement is unreachable). 
+Once symbolic execution is implemented, that can be used to make guaranteed statements about reachability, i.e. under-approximate.*
+
+![unreachable! feedback](analyzer-examples/unreachable.png)
 
 [**Type-checking**](analyzer-examples/scopes.progge): Proggers notices that there are five distinct variables called `x`, as one can see in the cleaned-up AST that Proggers returns:
 ```rust 

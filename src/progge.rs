@@ -103,18 +103,18 @@ fn main() -> Result<(), TcError> {
             // TODO: once symbolic execution is added, add possible cases that reach this statement
             let state = &ai_env.unreachable_states[loc];
             if !state.is_bottom(&ai_env.man) {
-                Report::build(ariadne::ReportKind::Error, src_file, loc.start)
+                Report::build(ariadne::ReportKind::Warning, src_file, loc.start)
                     .with_label(
                         Label::new(
                             (src_file, loc.range())
                         )
                             .with_message(
                                 format!(
-                                    "statement is reachable - state is {}",
+                                    "statement may be reachable - state is {}",
                                     state.to_string(&ai_env.man, &ai_env.env).fg(Color::Cyan)
                                 )
                             )
-                            .with_color(Color::Red)
+                            .with_color(Color::Yellow)
                     )
                     .finish()
                     .print((src_file, Source::from(src.clone())))

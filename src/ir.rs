@@ -19,7 +19,7 @@ pub struct IntraProcCFG {
     pub params: Vec<Param>,
 }
 
-type IntraGraph = DiGraph<IRNode, IREdge>;
+type IntraGraph = DiGraph<WithLoc<IRNode>, IREdge>;
 
 #[derive(Clone, Debug)]
 pub enum IRNode {
@@ -108,14 +108,14 @@ impl IntraProcCFG {
         for stm in &**block {
             match **stm {
                 Stmt::Testcase() => {
-                    let added = self.graph.add_node(IRTestcase);
+                    let added = self.graph.add_node(WithLoc::new(IRTestcase, stm.loc));
                     for (prev_node, connect_prev) in &prev_nodes {
                         self.graph.add_edge(*prev_node, added, *connect_prev);
                     }
                     prev_nodes = vec![(added, Fallthrough)];
                 }
                 Stmt::Unreachable() => {
-                    let added = self.graph.add_node(IRUnreachable);
+                    let added = self.graph.add_node(WithLoc::new(IRUnreachable, stm.loc));
                     for (prev_node, connect_prev) in &prev_nodes {
                         self.graph.add_edge(*prev_node, added, *connect_prev);
                     }
@@ -123,8 +123,8 @@ impl IntraProcCFG {
                 }
                 Stmt::Return(ref e_opt) => {
                     let added = match e_opt {
-                        Some(e) => self.graph.add_node(IRReturn(Some(e.elem.clone()))),
-                        None => self.graph.add_node(IRReturn(None)),
+                        Some(e) => self.graph.add_node(WithLoc::new(IRReturn(Some(e.elem.clone())), stm.loc)),
+                        None => self.graph.add_node(WithLoc::new(IRReturn(None), stm.loc)),
                     };
                     for (prev_node, connect_prev) in &prev_nodes {
                         self.graph.add_edge(*prev_node, added, *connect_prev);
@@ -134,21 +134,21 @@ impl IntraProcCFG {
                     prev_nodes = vec![];
                 }
                 Stmt::Decl(ref v, ref e) => {
-                    let added = self.graph.add_node(IRDecl(v.elem.clone(), e.elem.clone()));
+                    let added = self.graph.add_node(WithLoc::new(IRDecl(v.elem.clone(), e.elem.clone()), stm.loc));
                     for (prev_node, connect_prev) in &prev_nodes {
                         self.graph.add_edge(*prev_node, added, *connect_prev);
                     }
                     prev_nodes = vec![(added, Fallthrough)];
                 }
                 Stmt::Assn(ref le, ref e) => {
-                    let added = self.graph.add_node(IRAssn(le.elem.clone(), e.elem.clone()));
+                    let added = self.graph.add_node(WithLoc::new(IRAssn(le.elem.clone(), e.elem.clone()), stm.loc));
                     for (prev_node, connect_prev) in &prev_nodes {
                         self.graph.add_edge(*prev_node, added, *connect_prev);
                     }
                     prev_nodes = vec![(added, Fallthrough)];
                 }
                 Stmt::Call(ref f, ref args) => {
-                    let added = self.graph.add_node(IRCall(f.clone(), WithLoc::new(args.iter().map(|arg| arg.elem.clone()).collect(), args.loc)));
+                    let added = self.graph.add_node(WithLoc::new(IRCall(f.clone(), WithLoc::new(args.iter().map(|arg| arg.elem.clone()).collect(), args.loc)), stm.loc));
                     for (prev_node, connect_prev) in &prev_nodes {
                         self.graph.add_edge(*prev_node, added, *connect_prev);
                     }
@@ -159,7 +159,7 @@ impl IntraProcCFG {
                     ref if_branch,
                     ref else_branch,
                 } => {
-                    let branch = self.graph.add_node(IRCBranch(cond.deref().clone()));
+                    let branch = self.graph.add_node(WithLoc::new(IRCBranch(cond.deref().clone()), stm.loc));
                     for (prev_node, connect_prev) in &prev_nodes {
                         self.graph.add_edge(*prev_node, branch, *connect_prev);
                     }
@@ -185,7 +185,7 @@ impl IntraProcCFG {
                     //          |
                     //          -FALSE---> after_node
 
-                    let branch = self.graph.add_node(IRCBranch(cond.deref().clone()));
+                    let branch = self.graph.add_node(WithLoc::new(IRCBranch(cond.deref().clone()), stm.loc));
                     for (prev_node, connect_prev) in &prev_nodes {
                         self.graph.add_edge(*prev_node, branch, *connect_prev);
                     }
@@ -212,9 +212,9 @@ impl IntraProcCFG {
 
 impl From<&FuncDef> for IntraProcCFG {
     fn from(f: &FuncDef) -> Self {
-        let mut graph = DiGraph::new();
-        let entry = graph.add_node(IRSkip);
-        let exit = graph.add_node(IRSkip);
+        let mut graph = IntraGraph::new();
+        let entry = graph.add_node(WithLoc::no_loc(IRSkip));
+        let exit = graph.add_node(WithLoc::no_loc(IRSkip));
 
         let mut res = IntraProcCFG {
             graph,

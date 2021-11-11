@@ -38,7 +38,7 @@ impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
                 let mut vars = self.env.keys().map(|v| v.as_str()).collect::<Vec<_>>();
                 vars.sort();
                 let src = self.cfg.graph.edge_endpoints(edge.id()).unwrap().0;
-                if let IRReturn(_) = self.cfg.graph[src] {
+                if let IRReturn(_) = self.cfg.graph[src].elem {
                     // ignore
                 } else {
                     // if we're not an outgoing edge of a return statement, don't print @RETURN@
@@ -290,7 +290,7 @@ impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
 fn handle_irnode<M: Manager>(
     man: &M,
     env: &Environment,
-    ir: &IRNode,
+    ir: &WithLoc<IRNode>,
     state: &mut Abstract,
     saved_states: &mut HashMap<Loc, (Interval, Abstract)>,
     unreachable_states: &mut HashMap<Loc, Abstract>,
@@ -298,7 +298,7 @@ fn handle_irnode<M: Manager>(
     use IRNode::*;
 
     // TODO: in Decl/Assn cases check that we are assigning int variable, otherwise skip
-    match ir {
+    match &**ir {
         // "true" constraint
         IRTestcase | IRSkip | IRBranch => None,
         IRDecl(v, e) => {
@@ -327,12 +327,7 @@ fn handle_irnode<M: Manager>(
             None
         }
         IRUnreachable => {
-            unreachable_states.insert(Loc {
-                line: 0,
-                col: 0,
-                start: 0,
-                end: 0
-            }, state.clone());
+            unreachable_states.insert(ir.loc, state.clone());
             
             None
         }
@@ -351,7 +346,7 @@ fn handle_irnode<M: Manager>(
             // TODO: Handle return better. How?
             // TODO: make this not panic if retty not int. need to track return type of analyzed function
             let v = Var(RETURN_VAR.to_string(), Type::Int);
-            handle_irnode(man, env, &IRAssn(LocExpr::Var(WithLoc::no_loc(v)), e.clone()), state, saved_states, unreachable_states)
+            handle_irnode(man, env, &WithLoc::new(IRAssn(LocExpr::Var(WithLoc::no_loc(v)), e.clone()), ir.loc), state, saved_states, unreachable_states)
         }
         IRReturn(None) => {
             // unhandled
