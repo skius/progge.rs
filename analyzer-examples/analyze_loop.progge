@@ -1,18 +1,32 @@
 fn analyze(x: int) {
     let i = 0;
     while i < x {
+        // only constants in intervals, hence [0, +oo]
+        // but from state { -i_1 + x_1 - 1 >= 0; i_1 >= 0 }
+        // one can see that `i <= x-1` holds
         analyze!(i);
 
-        if i < 0 {
-            analyze!(i + 100); // unreachable
+        if i > x {
+            // could be any expression
+            // unreachable
+            analyze!(i + 100);
         }
 
         i = i + 1;
     }
 
     if x >= 0 && x <= 10 {
+        // [0, 10]
         analyze!(x);
-        let i = 5;
+        let i = 0;
+        let some_condition = true;
+        // proggers isn't precise in these cases yet
+        if some_condition {
+            i = -1;
+        } else {
+            i = 5;
+        }
+        // [-10, 50]
         analyze!(i * x);
     }
 

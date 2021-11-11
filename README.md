@@ -73,6 +73,12 @@ fn analyze(x: int, y: int) -> int {
 ```
 ![numerical analysis CFG](analyzer-examples/numerical.png)
 
+Proggers also supports `analyze!` directives, which explicitly print possible values for a given expression.
+[For example](analyzer-examples/analyze_loop.progge), running `proggers --typecheck --analyze analyzer-examples/analyze_loop.progge` 
+gives the following feedback (image does not show the full output):
+
+![analyze! feedback](analyzer-examples/analyze_loop.png)
+
 [**Type-checking**](analyzer-examples/scopes.progge): Proggers notices that there are five distinct variables called `x`, as one can see in the cleaned-up AST that Proggers returns:
 ```rust 
 // Original source code
