@@ -1,15 +1,13 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use elina::ast::{
-    Abstract, Environment, Hcons, Manager, OptPkManager, Texpr, TexprBinop, TexprUnop,
-};
+use elina::ast::{Abstract, Environment, Hcons, Interval, Manager, OptPkManager, Texpr, TexprBinop, TexprUnop};
 use petgraph::dot::{Config, Dot};
 use petgraph::graph::{EdgeIndex, EdgeReference, NodeIndex};
 use petgraph::prelude::Dfs;
 use petgraph::visit::EdgeRef;
 use petgraph::Direction::{Incoming, Outgoing};
 
-use crate::ast::{BinOpcode, Type, Var};
+use crate::ast::{BinOpcode, Loc, Type, Var};
 use crate::ast::{LocExpr, Expr, UnOpcode, WithLoc};
 use crate::ir::{IREdge, IRNode, IntraProcCFG};
 use crate::ir::IRNode::IRReturn;
@@ -23,7 +21,9 @@ use crate::ir::IRNode::IRReturn;
 pub struct AbstractInterpretationEnvironment<'a, M: Manager> {
     pub man: M,
     pub env: Environment,
-    pub state_map: HashMap<EdgeIndex, Abstract>,
+    pub edge_state_map: HashMap<EdgeIndex, Abstract>,
+    // bounds in points of interest, e.g. analyze! calls
+    pub saved_states: HashMap<Loc, Interval>,
     pub cfg: &'a IntraProcCFG,
 }
 
@@ -32,7 +32,7 @@ impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
         let edge_getter = |_, edge: EdgeReference<IREdge>| {
             let mut intervals = "".to_owned();
     
-            if !self.state_map[&edge.id()].is_bottom(&self.man) {
+            if !self.edge_state_map[&edge.id()].is_bottom(&self.man) {
                 let mut vars = self.env.keys().map(|v| v.as_str()).collect::<Vec<_>>();
                 vars.sort();
                 let src = self.cfg.graph.edge_endpoints(edge.id()).unwrap().0;
@@ -47,12 +47,12 @@ impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
                     intervals += &format!(
                         "{}: {:?}\\n",
                         v,
-                        self.state_map[&edge.id()].get_bounds(&self.man, &self.env, v)
+                        self.edge_state_map[&edge.id()].get_bounds(&self.man, &self.env, v)
                     );
                 }
             }
     
-            let abs_string = self.state_map[&edge.id()].to_string(&self.man, &self.env);
+            let abs_string = self.edge_state_map[&edge.id()].to_string(&self.man, &self.env);
     
             let color = match edge.weight() {
                 IREdge::Fallthrough => "black",
@@ -153,130 +153,146 @@ fn env_from_cfg(cfg: &IntraProcCFG) -> Environment {
 }
 
 static WIDENING_THRESHOLD: usize = 100;
-/// This function returns a map from each edge to the abstract state at that edge.
+
 pub fn run(cfg: &IntraProcCFG) -> AbstractInterpretationEnvironment<impl Manager> {
-    let graph = &cfg.graph;
-    let entry = cfg.entry;
-
     let man = OptPkManager::default();
-
     let env = env_from_cfg(cfg);
 
-    let mut edge_state_map = HashMap::new();
-    let mut prev_state_of_nodes: HashMap<NodeIndex, Abstract> = HashMap::new();
-    let mut node_encounters: HashMap<NodeIndex, usize> = HashMap::new();
-
-    for edge in graph.edge_indices() {
-        edge_state_map.insert(edge, Abstract::bottom(&man, &env));
-    }
-    for node in graph.node_indices() {
-        prev_state_of_nodes.insert(node, Abstract::bottom(&man, &env));
-        node_encounters.insert(node, 0);
-    }
-
-    // let entry_outs = graph
-    //     .edges_directed(entry, Outgoing)
-    //     .map(|e| e.id())
-    //     .collect::<Vec<_>>();
-
-    // for entry_out in &entry_outs {
-    //     edge_state_map.insert(*entry_out, Abstract::top(&man, &env));
-    // }
-
-    prev_state_of_nodes.insert(entry, Abstract::top(&man, &env));
-
-    let mut worklist = VecDeque::new();
-    worklist.push_back(entry);
-
-    while !worklist.is_empty() {
-        let curr_node = worklist.pop_front().unwrap();
-
-        let incoming_states = graph
-            .edges_directed(curr_node, Incoming)
-            .map(|e| &edge_state_map[&e.id()])
-            .collect::<Vec<_>>();
-
-        let prev_state = &prev_state_of_nodes[&curr_node];
-
-        let mut curr_state = if curr_node == entry {
-            Abstract::top(&man, &env)
-        } else {
-            let mut curr_state = Abstract::bottom(&man, &env);
-            for state in &incoming_states {
-                // TODO: add join &[Abstract] to elina?
-                curr_state.join(&man, *state);
-            }
-            curr_state
-        };
-
-        // // Check widening (of course only if we've ever actually done something
-        // if prev_state == &curr_state && node_encounters[&curr_node] > 0 {
-        //     // nothing to do, continue
-        //     continue;
-        // }
-        // prev_state != curr_state
-        *node_encounters.get_mut(&curr_node).unwrap() += 1;
-        if node_encounters[&curr_node] > WIDENING_THRESHOLD {
-            // println!(
-            //     "\n--------\nWIDENING: prev{} and curr{}",
-            //     prev_state.to_string(&man, &env),
-            //     curr_state.to_string(&man, &env)
-            // );
-            curr_state = prev_state.widen_copy(&man, &curr_state);
-            // println!("WIDENED INTO: {}", curr_state.to_string(&man, &env));
-        }
-        prev_state_of_nodes.insert(curr_node, curr_state.clone());
-
-        // Need to compute outgoing state
-        let curr_irnode = graph[curr_node].clone();
-        let taken_state = handle_irnode(&man, &env, &curr_irnode, &mut curr_state);
-
-        let outgoing_edges = graph
-            .edges_directed(curr_node, Outgoing)
-            // .map(|e| e.id())
-            .collect::<Vec<_>>();
-
-        for out_edge in outgoing_edges {
-            let edge_kind = *out_edge.weight();
-            let out_state = match edge_kind {
-                IREdge::Fallthrough | IREdge::NotTaken => curr_state.clone(),
-                IREdge::Taken => {
-                    // curr_node must be CBranch and we must have gotten a Some(taken) result state
-                    taken_state.clone().unwrap()
-                }
-            };
-
-            // println!(
-            //     "\n-----\nHandling Edge\nold out edge state: {}",
-            //     edge_state_map[&out_edge.id()].to_string(&man, &env)
-            // );
-            // println!("new out_state: {}", out_state.to_string(&man, &env));
-
-            if edge_state_map[&out_edge.id()] == out_state {
-                // we are not causing a change in succ
-                continue;
-            }
-            edge_state_map.insert(out_edge.id(), out_state);
-            // if old_state != taken_state then add to worklist
-            worklist.push_back(out_edge.target());
-        }
-    }
-
-    //println!("{}", graphviz_with_states(cfg, &man, &env, &edge_state_map));
-
-    AbstractInterpretationEnvironment {
-        man,
+    let edge_state_map = HashMap::new();
+    let saved_states: HashMap<Loc, Interval> = HashMap::new();
+    
+    let mut res = AbstractInterpretationEnvironment {
+        man: man,
         env,
-        state_map: edge_state_map,
-        cfg,
-    }
+        edge_state_map: edge_state_map,
+        saved_states: saved_states,
+        cfg
+    };
+
+    // TODO: enforce .run() better? maybe make AIE::run() private and keep ai::run() public?
+    res.run();
+
+    res
 }
 
-fn handle_irnode<M: Manager>(
-    man: &M,
+impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
+    
+    /// This function returns a map from each edge to the abstract state at that edge.
+    pub fn run(&mut self) {
+        let entry = self.cfg.entry;
+        let man = &self.man;
+        let env = &self.env;
+
+        let mut prev_state_of_nodes: HashMap<NodeIndex, Abstract> = HashMap::new();
+        let mut node_encounters: HashMap<NodeIndex, usize> = HashMap::new();
+
+        for edge in self.cfg.graph.edge_indices() {
+            self.edge_state_map.insert(edge, Abstract::bottom(man, env));
+        }
+        for node in self.cfg.graph.node_indices() {
+            prev_state_of_nodes.insert(node, Abstract::bottom(man, env));
+            node_encounters.insert(node, 0);
+        }
+
+        // let entry_outs = self.cfg.graph
+        //     .edges_directed(entry, Outgoing)
+        //     .map(|e| e.id())
+        //     .collect::<Vec<_>>();
+
+        // for entry_out in &entry_outs {
+        //     self.edge_state_map.insert(*entry_out, Abstract::top(man, env));
+        // }
+
+        prev_state_of_nodes.insert(entry, Abstract::top(man, env));
+
+        let mut worklist = VecDeque::new();
+        worklist.push_back(entry);
+
+        while !worklist.is_empty() {
+            let curr_node = worklist.pop_front().unwrap();
+
+            let incoming_states = self.cfg.graph
+                .edges_directed(curr_node, Incoming)
+                .map(|e| &self.edge_state_map[&e.id()])
+                .collect::<Vec<_>>();
+
+            let prev_state = &prev_state_of_nodes[&curr_node];
+
+            let mut curr_state = if curr_node == entry {
+                Abstract::top(man, env)
+            } else {
+                let mut curr_state = Abstract::bottom(man, env);
+                for state in &incoming_states {
+                    // TODO: add join &[Abstract] to elina?
+                    curr_state.join(man, *state);
+                }
+                curr_state
+            };
+
+            // // Check widening (of course only if we've ever actually done something
+            // if prev_state == &curr_state && node_encounters[&curr_node] > 0 {
+            //     // nothing to do, continue
+            //     continue;
+            // }
+            // prev_state != curr_state
+            *node_encounters.get_mut(&curr_node).unwrap() += 1;
+            if node_encounters[&curr_node] > WIDENING_THRESHOLD {
+                // println!(
+                //     "\n--------\nWIDENING: prev{} and curr{}",
+                //     prev_state.to_string(man, env),
+                //     curr_state.to_string(man, env)
+                // );
+                curr_state = prev_state.widen_copy(man, &curr_state);
+                // println!("WIDENED INTO: {}", curr_state.to_string(man, env));
+            }
+            prev_state_of_nodes.insert(curr_node, curr_state.clone());
+
+            // Need to compute outgoing state
+            let curr_irnode = self.cfg.graph[curr_node].clone();
+            let taken_state = handle_irnode(man, env, &curr_irnode, &mut curr_state, &mut self.saved_states);
+
+            let outgoing_edges = self.cfg.graph
+                .edges_directed(curr_node, Outgoing)
+                // .map(|e| e.id())
+                .collect::<Vec<_>>();
+
+            for out_edge in outgoing_edges {
+                let edge_kind = *out_edge.weight();
+                let out_state = match edge_kind {
+                    IREdge::Fallthrough | IREdge::NotTaken => curr_state.clone(),
+                    IREdge::Taken => {
+                        // curr_node must be CBranch and we must have gotten a Some(taken) result state
+                        taken_state.clone().unwrap()
+                    }
+                };
+
+                // println!(
+                //     "\n-----\nHandling Edge\nold out edge state: {}",
+                //     self.edge_state_map[&out_edge.id()].to_string(man, env)
+                // );
+                // println!("new out_state: {}", out_state.to_string(man, env));
+
+                if self.edge_state_map[&out_edge.id()] == out_state && node_encounters[&out_edge.target()] != 0 {
+                    // we are not causing a change in succ
+                    // (note that we want to visit the succ at least once, hence node_encounters != 0)
+                    continue;
+                }
+                self.edge_state_map.insert(out_edge.id(), out_state);
+                // if old_state != taken_state then add to worklist
+                worklist.push_back(out_edge.target());
+            }
+        }
+
+    }
+
+}
+
+fn handle_irnode(
+    man: &impl Manager,
     env: &Environment,
     ir: &IRNode,
     state: &mut Abstract,
+    saved_states: &mut HashMap<Loc, Interval>,
 ) -> Option<Abstract> {
     use IRNode::*;
 
@@ -312,14 +328,19 @@ fn handle_irnode<M: Manager>(
         IRCall(name, args) => {
             // Can ignore calls for now, but they can change state, namely when we pass arrays, which are by-reference
             // TODO: Also need to handle special functions like analyze!
-
+            if &**name == "analyze!" {
+                let arg = &args[0];
+                let arg_texpr = int_expr_to_texpr(env, arg);
+                let bounds = state.get_bounds_texpr(man, &arg_texpr);
+                saved_states.insert(args.loc, bounds);
+            }
             None
         }
         IRReturn(Some(e)) => {
             // TODO: Handle return better. How?
             // TODO: make this not panic if retty not int. need to track return type of analyzed function
             let v = Var(RETURN_VAR.to_string(), Type::Int);
-            handle_irnode(man, env, &IRAssn(LocExpr::Var(WithLoc::no_loc(v)), e.clone()), state)
+            handle_irnode(man, env, &IRAssn(LocExpr::Var(WithLoc::no_loc(v)), e.clone()), state, saved_states)
         }
         IRReturn(None) => {
             // unhandled
@@ -341,6 +362,8 @@ fn handle_irnode<M: Manager>(
         }
     }
 }
+
+
 
 fn bool_expr_to_hcons(env: &Environment, expr: &Expr) -> Hcons {
     use BinOpcode::*;

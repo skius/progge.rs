@@ -7,6 +7,11 @@ fn analyze(x: int) {
     let y = x * 2;
     if x + y < 9 {
         analyze!(x / 3);
+        if x/3 > 1 {
+            analyze!(x);
+        }
+        analyze!(x);
+
     }
     return;
 }

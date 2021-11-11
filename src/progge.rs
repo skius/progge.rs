@@ -4,6 +4,7 @@ extern crate lalrpop_util;
 use std::env::args;
 use std::fs::read_to_string;
 use std::process::exit;
+use ariadne::{Color, Fmt, Label, Report, Source};
 
 use proggers::ast::*;
 use proggers::ir::IntraProcCFG;
@@ -52,6 +53,43 @@ fn main() -> Result<(), TcError> {
         let analyze = IntraProcCFG::from(&**prog.find_funcdef("analyze").unwrap());
         let ai_env = proggers::ai::run(&analyze);
         println!("{}", ai_env.graphviz());
+
+        for (loc, bound) in ai_env.saved_states.iter() {
+            if bound.0 > bound.1 {
+                // Unreachable
+                Report::build(ariadne::ReportKind::Warning, src_file, loc.start)
+                    .with_label(
+                        Label::new(
+                            (src_file, loc.range())
+                        )
+                            .with_message("expression is unreachable")
+                            .with_color(Color::Yellow)
+                    )
+                    .with_note(
+                        format!("if this is intentional, consider using {} instead", "unreachable!".fg(Color::Yellow))
+                    )
+                    .finish()
+                    .print((src_file, Source::from(src.clone())))
+                    .unwrap();
+            } else {
+                Report::build(ariadne::ReportKind::Advice, src_file, loc.start)
+                    .with_label(
+                        Label::new(
+                            (src_file, loc.range())
+                        )
+                            .with_message(
+                                format!(
+                                    "expression may assume at most the values: {}",
+                                    format!("{:?}", bound).fg(Color::Cyan)
+                                )
+                            )
+                            .with_color(Color::Cyan)
+                    )
+                    .finish()
+                    .print((src_file, Source::from(src.clone())))
+                    .unwrap();
+            }
+        }
     }
     if let Some(output) = config.compile_target {
         proggers::compiler::compile(prog.clone().elem, &output, config.verbose);

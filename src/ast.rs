@@ -614,7 +614,7 @@ impl Display for Var {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct Loc {
     pub line: usize,
     pub col: usize,

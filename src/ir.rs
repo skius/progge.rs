@@ -28,7 +28,7 @@ pub enum IRNode {
     IRSkip,
     IRDecl(Var, Expr),
     IRAssn(LocExpr, Expr),
-    IRCall(String, Vec<Expr>),
+    IRCall(WithLoc<String>, WithLoc<Vec<Expr>>),
     IRReturn(Option<Expr>),
 
     IRCBranch(Expr),
@@ -50,7 +50,7 @@ impl IRNode {
             }
             IRCall(_, es) => {
                 let mut fv = HashSet::new();
-                for e in es {
+                for e in es.iter() {
                     fv.extend(e.free_vars());
                 }
                 fv
@@ -148,7 +148,7 @@ impl IntraProcCFG {
                     prev_nodes = vec![(added, Fallthrough)];
                 }
                 Stmt::Call(ref f, ref args) => {
-                    let added = self.graph.add_node(IRCall(f.elem.clone(), args.iter().map(|arg| arg.elem.clone()).collect()));
+                    let added = self.graph.add_node(IRCall(f.clone(), WithLoc::new(args.iter().map(|arg| arg.elem.clone()).collect(), args.loc)));
                     for (prev_node, connect_prev) in &prev_nodes {
                         self.graph.add_edge(*prev_node, added, *connect_prev);
                     }
