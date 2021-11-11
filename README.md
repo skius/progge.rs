@@ -13,8 +13,12 @@ Proggers is a program analysis playground for a simple, imperative language.
 ### Installation
 
 This program needs ELINA to work. See [elina-rs](https://github.com/skius/elina-rs) for more information and installation instructions.
+Also, LLVM version 13 is required. [Their website](https://apt.llvm.org/) may be of interest. 
 
-Once you have ELINA installed, you can install Proggers with: `cargo install --git https://github.com/skius/progge.rs`
+*Neither ELINA nor LLVM are required for type-checking and CFG visualization, hence they could be turned
+into a crate feature. Please, feel free to contribute!*
+
+Once the prerequisites are installed, you can install Proggers with: `cargo install --git https://github.com/skius/progge.rs`
 
 ### Usage
 Run `proggers` to print the usage information.
