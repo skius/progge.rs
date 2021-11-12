@@ -10,8 +10,6 @@ use lazy_static::lazy_static;
 
 use crate::ast::*;
 
-// Add proper type checking, with results, make use of Loc
-
 /*
    Idea for type context:
    Make it a tree. i.e. have each scope be a node
@@ -19,6 +17,9 @@ use crate::ast::*;
 
     TODO: still need a way to refer to type checking results _after_ type checking.
     currently variables store their Type, but do we need more?
+    Added Type to WithLoc, so expressions can store their type-checked types now.
+    However, we might want to refactor into something like this:
+    https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=7965d9f8a31436306ddcf0fe91ddb0fd
 */
 
 pub struct ScopedTypeContext {
@@ -194,16 +195,6 @@ impl<P: Borrow<Program>> From<P> for FuncTypeContext {
 
         // TODO: maybe add "external" bool to value, then we can do better error reporting
         // Built-ins
-        // map.insert("print_int".to_string(), (
-        //     WithLoc::no_loc("print_int".to_string()),
-        //     WithLoc::no_loc(vec![(WithLoc::no_loc(Var("i".to_string(), Type::Int)), WithLoc::no_loc(Type::Int))]),
-        //     WithLoc::no_loc(Type::Int)));
-        //
-        // map.insert("int_arg".to_string(), (
-        //     WithLoc::no_loc("int_arg".to_string()),
-        //     WithLoc::no_loc(vec![(WithLoc::no_loc(Var("i".to_string(), Type::Int)), WithLoc::no_loc(Type::Int))]),
-        //     WithLoc::no_loc(Type::Int)));
-
         for (name, BuiltinType { param_tys, retty, ..}) in BUILTINS.iter() {
             map.insert(name.to_string(), (
                 WithLoc::no_loc(name.to_string()),
@@ -336,6 +327,8 @@ impl TypeChecker {
         .with_message::<&str>(msg)
 
     }
+
+    // TODO: TC maybe add "_internal" variants for that that do not return Results, and a non-_internal wrapper that just calls _internal and then returns Err if self.errors is non-empty
 
     // If we don't want to mutate the prog while typechecking, an alternative could really be to
     // just redo a pass with the same scoping rules, but that doesn't seem DRY
@@ -510,10 +503,7 @@ impl TypeChecker {
     }
 
     // Return type: Some(retty) if it returns, None if it doesn't return.
-    // Change it to WithLoc, so we know there the return type is coming from?
-    // TODO: maybe also change all Results to actually be tuples, because we're doing
-    // "recoverable" errors? by which I mean grabbing as many errors as possible in one go
-    // for that we need to proceed even after a sub-call fails
+    // TODO: Change it to WithLoc, so we know there the return type is coming from?
     pub fn tc_block(&mut self, block: &mut WithLoc<Block>, retty_expected: WithLoc<Type>) -> Option<Type> {
         // open type-check scope
         let prev_scope = self.curr_s_ty_ctx.clone();
@@ -537,7 +527,6 @@ impl TypeChecker {
         let res = match &mut stmt.elem {
             Stmt::Testcase() => None,
             Stmt::Unreachable() => None,
-            // TODO: typecheck that return is actually returning the correct type here, needs curr_fn string though
             Stmt::Return(e_opt) => {
                 let (retty, loc)  = match e_opt {
                     Some(e) => (self.tc_exp(e), e.loc),
@@ -909,7 +898,6 @@ impl TypeChecker {
                 match t {
                     None => {
                         // TODO: Pass "print errors" flag that prints errors with ariadne live, otherwise just accumulate them and return
-                        // TODO: extract v.loc.start..v.loc.end into v.loc.span()
 
                         let [color1, color2] = colors();
 
@@ -957,7 +945,6 @@ impl TypeChecker {
             }
             Expr::BinOp(op, left, right) => {
                 let op_type = op.get_type();
-                // TODO: don't short-circuit yet, but collect *both* errors and then break out
                 let left_t = self.tc_exp(left);
                 let right_t = self.tc_exp(right);
 

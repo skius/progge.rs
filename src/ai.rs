@@ -313,8 +313,8 @@ fn handle_irnode<M: Manager>(
             None
         }
         IRAssn(LocExpr::Var(v), e) => {
-            if v.is_bool() {
-                // Not handling boolean variables
+            if !v.is_int() {
+                // Only handling ints so far
                 return None;
             }
 
@@ -332,8 +332,7 @@ fn handle_irnode<M: Manager>(
             None
         }
         IRCall(name, args) => {
-            // Can ignore calls for now, but they can change state, namely when we pass arrays, which are by-reference
-            // TODO: Also need to handle special functions like analyze!
+            // TODO: Can ignore calls for now, but they can change state, namely when we pass arrays, which are by-reference
             if &**name == "analyze!" {
                 let arg = &args[0];
                 let arg_texpr = int_expr_to_texpr(env, arg);

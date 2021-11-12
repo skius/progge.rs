@@ -1,6 +1,3 @@
-// TODO: remove Loc everywhere, only add it to testcase! or where needed. Can still use later.
-// TODO: or use deref maybe?
-
 use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::fmt::{Debug, Display, Formatter};
@@ -177,8 +174,6 @@ impl Display for Block {
     }
 }
 
-// TODO: call statement for functions that return unit
-
 #[derive(Debug, Clone)]
 pub enum Stmt {
     // TODO: add optional params to testcase and unreachable, i.e. to name it?
@@ -276,9 +271,6 @@ impl Display for LocExpr {
 }
 
 
-// TODO: how to handle Calls? they may be either Bool or Int expressions
-// TODO: same for Variables...
-// decided: no types in rust representation
 #[derive(Debug, Clone)]
 pub enum Expr {
     IntLit(i64),
@@ -500,7 +492,6 @@ impl Display for UnOpcode {
 //     Binop(Box<BoolExpr>),
 // }
 
-// TODO: TC maybe add "_internal" variants for that that do not return Results, and a non-_internal wrapper that just calls _internal and then returns Err if self.errors is non-empty
 #[derive(Debug, Clone, Eq)]
 pub enum Type {
     Int,

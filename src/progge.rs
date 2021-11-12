@@ -14,12 +14,6 @@ use proggers::tc::{FuncTypeContext, TcError, TypeChecker, VariableTypeContext};
 lalrpop_mod!(pub progge); // synthesized by LALRPOP
 
 fn main() -> Result<(), TcError> {
-    // TODO: Parsing idea. have a stack of hashmaps that store variable's types (akin to
-    // de brujin indices), open a new one whenever you open a new scope. if you need to look up
-    // a variable's type, you look first in the top hashmap, then go down.
-
-    //proggers::compiler::tryme();
-
     let config = parse_args();
 
     let src_file = &config.src_file;
