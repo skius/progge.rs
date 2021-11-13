@@ -144,7 +144,7 @@ fn analyze(x_1: int) {
 
 ```
 
-Furthermore, Progge is able to give nice error messages (thanks to [ariadne](https://github.com/zesterer/ariadne)):
+Furthermore, Proggers is able to give nice error messages (thanks to [Ariadne](https://github.com/zesterer/ariadne)):
 ```rust
 // Source
 fn foo() -> int {

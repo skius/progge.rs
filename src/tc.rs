@@ -581,6 +581,7 @@ impl TypeChecker {
                 // println!("inserted: {}", t_exp);
                 self.disambig_var(&mut *v);
                 v.set_type(&t);
+                v.set_type_loc(&t);
                 None
             }
             Stmt::Assn(le, e) => {
@@ -666,6 +667,8 @@ impl TypeChecker {
                         }
 
                         self.disambig_var(&mut *v);
+                        v.set_type(&t);
+                        v.set_type_loc(&t);
                         None
                     }
                     LocExpr::Index(arr, idx) => {
