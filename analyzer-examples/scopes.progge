@@ -1,4 +1,5 @@
 fn analyze(x: int) -> int {
+    x = 0;
     let x_2 = 10;
     let x = x;
     let x = x + 1;

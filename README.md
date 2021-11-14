@@ -111,6 +111,7 @@ Once symbolic execution is implemented, that can be used to make guaranteed stat
 ```rust 
 // Original source code
 fn analyze(x: int) -> int {
+    x = 0;
     let x_2 = 10;
     let x = x;
     let x = x + 1;
@@ -129,6 +130,7 @@ fn analyze(x: int) -> int {
 
 // Type-checked AST
 fn analyze(x_1: int) {
+    x_1 = 0;
     let x_2_1 = 10;
     let x_2 = x_1;
     let x_3 = (x_2 + 1);
