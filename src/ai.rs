@@ -342,6 +342,11 @@ fn handle_irnode<M: Manager>(
                 let bounds = state.get_bounds_texpr(man, &arg_texpr);
                 saved_states.insert(args.loc, (bounds, state.clone()));
             }
+            if &**name == "assume!" {
+                let arg = &args[0];
+                let assumption = bool_expr_to_hcons(env, arg);
+                state.meet(man, &assumption);
+            }
             None
         }
         IRReturn(Some(e)) => {
