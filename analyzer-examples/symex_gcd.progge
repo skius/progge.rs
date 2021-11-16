@@ -1,0 +1,20 @@
+fn analyze(x: int, y: int) {
+    if x >= 0 && y > 0 {
+        if gcd(x, y) > 10 {
+            testcase!;
+        }
+        return;
+    }
+
+    return;
+}
+
+fn gcd(a: int, b: int) -> int {
+    let temp = 0;
+    while b != 0 {
+        temp = b;
+        b = a % b;
+        a = temp;
+    }
+    return a;
+}
