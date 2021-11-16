@@ -398,6 +398,20 @@ type WL<T> = WithLoc<T>;
 /// This function takes a program, and returns a copy of the Program with bounded loops,
 /// by unrolling them by a factor of [`UNROLL_FACTOR`]. Also returns whether any loop bounding was actually done or not.
 pub fn bound_loops(prog: &Program) -> (Program, bool) {
+    /*
+    Perhaps a slight issue: Currently, there are let-bindings in a loop's body, these will not be renamed,
+    since we don't TC afterwards. This does not seem to be an issue however, as we are just overwriting
+    variable's symbolic states that are not relevant anymore.
+
+    e.g.
+    while true {
+        let i = n;
+        i = i + 1;
+    }
+
+    I think it should be fine.
+    */
+
     let mut did_bound = false;
     let mut new_prog = Program(Vec::new());
     for func in prog.0.iter() {

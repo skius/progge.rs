@@ -8,6 +8,14 @@ fn analyze(x: int, y: int, z: int, a: bool) {
         testcase!;
     }
 
+    if x_squared < 0 {
+        unreachable!;
+    }
+
+    if x_squared > y_squared {
+        unreachable!;
+    }
+
     while x_squared < y_squared && a {
         testcase!;
         x_squared = x_squared + 1;
