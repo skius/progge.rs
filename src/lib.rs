@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod ast;
+pub mod se;
 pub mod ir;
 pub mod tc;
 pub mod compiler;

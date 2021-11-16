@@ -1,0 +1,17 @@
+fn analyze(x: int, y: int, z: int, a: bool) {
+    assume!(x > 0);
+    assume!(y > 0);
+    assume!(z > 0);
+    let x_squared = x * x;
+    let y_squared = y * y;
+    if x_squared + y_squared == z * z {
+        testcase!;
+    }
+
+    while x_squared < y_squared && a {
+        testcase!;
+        x_squared = x_squared + 1;
+    }
+
+    return;
+}

@@ -1,9 +1,26 @@
-fn analyze(x: int, y: int) {
+fn analyze(x: int, y: int, z: bool) {
+    if z  {
+        return;
+    }
     let i = 0;
     if x < y || x > y {
         i = 1;
     }
     if i == 0 {
+        // is reachable
+        unreachable!;
+    }
+
+    let j = 0;
+    if x < y {
+        j = 1;
+    } else {
+        j = 1;
+    }
+
+    if j == 0 {
+        // numerical abstract interpretation cannot handle this - there is no relation between {x,y} and j
+        // it is truly unreachable
         unreachable!;
     }
 

@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate lalrpop_util;
 
+use std::collections::HashSet;
 use std::env::args;
 use std::fs::read_to_string;
 use std::process::exit;
@@ -8,6 +9,7 @@ use ariadne::{Color, Fmt, Label, Report, Source};
 
 use proggers::ast::*;
 use proggers::ir::IntraProcCFG;
+use proggers::se::{bound_loops, fill_model, run_intra_symbolic_execution, string_of_model};
 
 use proggers::tc::{FuncTypeContext, TcError, TypeChecker, VariableTypeContext};
 
@@ -117,6 +119,54 @@ fn main() -> Result<(), TcError> {
     }
     if let Some(output) = config.compile_target {
         proggers::compiler::compile(prog.clone().elem, &output, config.verbose);
+    }
+
+
+    // TODO: combine symex + AI results
+    let (unrolled, did_bound) = bound_loops(&*prog);
+    // if did_bound is true, then any statements about unreachability are in fact guarantees.
+    // println!("{}", unrolled);
+    let mut symex = run_intra_symbolic_execution(unrolled.find_funcdef("analyze").unwrap());
+    // the symbolix variables
+    let analyze_params = unrolled.find_funcdef("analyze").unwrap().params.iter().map(|(v, _)| &v.elem);
+    let analyze_params_set = analyze_params.clone().cloned().collect();
+    // Guaranteed reachable, i.e. provably incorrect
+    let mut unreachable_paths_keys = symex.unreachable_paths.keys().cloned().collect::<Vec<_>>();
+    unreachable_paths_keys.sort_by_key(|l| l.start);
+    for loc in &unreachable_paths_keys {
+        let model = symex.unreachable_paths.get_mut(loc).unwrap();
+        fill_model(model, &analyze_params_set);
+        let model_string = string_of_model(model, analyze_params.clone());
+        Report::build(ariadne::ReportKind::Error, src_file, loc.start)
+            .with_label(
+                Label::new(
+                    (src_file, loc.range())
+                )
+                    .with_message(
+                        format!(
+                            "statement is reachable with the following inputs: {}",
+                            model_string.fg(Color::Red)
+                        )
+                    )
+                    .with_color(Color::Red)
+            )
+            .finish()
+            .print((src_file, Source::from(src.clone())))
+            .unwrap();
+    }
+
+    let mut testcases_keys = symex.testcases.keys().cloned().collect::<Vec<_>>();
+    testcases_keys.sort_by_key(|l| l.start);
+    for loc in &testcases_keys {
+        let models = symex.testcases.get_mut(loc).unwrap();
+        println!("-----------------------");
+        println!("{}:{}:{}: inputs reaching this statement:", src_file, loc.line, loc.col);
+        models.dedup();
+        for model in models {
+            fill_model(model, &analyze_params_set);
+            let model_string = string_of_model(model, analyze_params.clone());
+            println!("{}", model_string);
+        }
     }
 
     Ok(())

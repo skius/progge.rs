@@ -251,6 +251,9 @@ impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
             let curr_irnode = self.cfg.graph[curr_node].clone();
             let taken_state = handle_irnode(man, env, &curr_irnode, &mut curr_state, &mut self.saved_states, &mut self.unreachable_states);
 
+            // println!("{}", &curr_state.to_string(&self.man, &self.env));
+            // println!("{:?}", &curr_state.get_bounds(&self.man, &self.env, "i_1"));
+
             let outgoing_edges = self.cfg.graph
                 .edges_directed(curr_node, Outgoing)
                 // .map(|e| e.id())

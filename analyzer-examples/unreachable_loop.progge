@@ -1,0 +1,16 @@
+fn analyze(x: int) {
+    let i = 0;
+    let n = 3;
+    let x_prev = x;
+    while i < n {
+        x = x + i;
+        i = i + 1;
+        testcase!;
+    }
+
+    if x_prev < x + 5 {
+        unreachable!;
+    }
+
+    return;
+}

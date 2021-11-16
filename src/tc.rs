@@ -174,6 +174,7 @@ lazy_static! {
         m.insert("print_int", BuiltinType::new(vec![Type::Int], Type::Int, true));
         m.insert("int_arg", BuiltinType::new(vec![Type::Int], Type::Int, true));
         m.insert("analyze!", BuiltinType::new(vec![Type::Any], Type::Unit, false));
+        m.insert("assume!", BuiltinType::new(vec![Type::Bool], Type::Unit, false));
         m
     };
 }
