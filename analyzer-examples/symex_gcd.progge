@@ -1,5 +1,5 @@
 fn analyze(x: int, y: int, n: int) {
-    assume!(n > 15);
+    assume!(n > 25);
     if x >= 0 && y > 0 {
         let gcd = gcd(x, y);
         let gcd_rec = gcd_rec(x, y);

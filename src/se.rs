@@ -10,7 +10,7 @@ use crate::ir::IntraProcCFG;
 // Invariant (perhaps): Only variables in a symbolic store are the symbolic variables, e.g. obtained
 // as arguments or from black-box function calls. The other variables should be stored as expression
 // of the symbolic variables.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SymbolicStore(pub HashMap<String, Expr>);
 
 // pub struct PathConstraint(pub Expr);
@@ -150,7 +150,7 @@ pub fn run_intra_symbolic_execution(prog: Program) -> SymbolicExecutor {
     symex
 }
 
-pub static RECURSION_LIMIT: usize = 5;
+pub static RECURSION_LIMIT: usize = 6;
 
 // TODO: because of mutable self, we will probably need to clone functions very often. Wasteful.
 pub struct SymbolicExecutor {
@@ -166,11 +166,21 @@ impl SymbolicExecutor {
         let mut new_store = SymbolicStore(HashMap::new());
         let mut new_pct = pct.clone();
 
+        let recs_prev = self.function_invocations.clone();
+
         for (i, (v, _)) in func.params.iter().enumerate() {
             new_store.insert(v.elem.0.clone(), args[i].clone());
         }
 
+        // println!("______ running func {}", func.name.as_str());
+        // println!("input was: {}, sat? {:?}", pct, satisfiable(pct));
         let paths = self.run_block(&func.body, &new_store, &new_pct, &None);
+
+        // // TODO: why is a sat input producing no outputs?
+        // println!("{:?}\n", &paths);
+
+        // Need to restore function invocations - we count "recursion-depth", not how many times we call a function in total.
+        self.function_invocations = recs_prev;
 
         paths.into_iter().map(|(_, pct, retval)| (pct, retval)).collect()
     }
@@ -179,6 +189,7 @@ impl SymbolicExecutor {
     fn run_block(&mut self, block: &Block, store: &SymbolicStore, pct: &PathConstraint, ret_val: &Option<Expr>) -> Vec<(SymbolicStore, PathConstraint, Option<Expr>)> {
         // If in this path we have already returned, then we can just break out.
         if let Some(ret_val) = ret_val {
+            // println!("already returned {}", ret_val);
             return vec![(store.clone(), pct.clone(), Some(ret_val.clone()))];
         }
 
@@ -195,6 +206,7 @@ impl SymbolicExecutor {
                 paths.iter().map(|(store, pct, retval)| {
                     if retval.is_some() {
                         // Already returned, so we short-circuit
+                        // println!("already returned before execing {} : {}", stmt.clone(), retval.clone().unwrap());
                         return vec![(store.clone(), pct.clone(), retval.clone())];
                     }
                     self.run_stmt(stmt, store, pct, retval)
@@ -219,6 +231,8 @@ impl SymbolicExecutor {
             }
             Stmt::Decl(v, exp) => {
                 store.assign(self, &v.elem.0, exp, pct).into_iter().map(|(store, pct)| {
+                    // println!("decl exp: {}, pct: {}, ret {:?}", exp, pct, ret_val);
+                    // println!("satres: {:?}", satisfiable(&pct));
                     (store, pct, ret_val.clone())
                 }).collect()
             }
@@ -243,7 +257,6 @@ impl SymbolicExecutor {
                 return vec![(store.clone(), new_pct, ret_val.clone())];
             }
             Stmt::Testcase() => {
-                // println!("testcase at loc {:?}", stmt.loc);
                 let satres = satisfiable(&pct);
                 if let SatResult::Sat(mut model) = satres {
                     self.testcases.entry(stmt.loc).or_insert(Vec::new()).push(model);
@@ -258,13 +271,15 @@ impl SymbolicExecutor {
                 vec![(store.clone(), pct.clone(), ret_val.clone())]
             }
             Stmt::Return(Some(exp)) => {
+                // println!("Returning {}, store: {:?}", exp, store);
                 store.symbolize(self, exp, pct).into_iter().map(|(ret_val, pct)| {
+                    // println!("Returning {}", &ret_val);
                     (store.clone(), pct, Some(ret_val))
                 }).collect()
             }
             Stmt::Return(None) => {
                 // TODO: Hmm. Option<Expr> does not distinguish between all cases, "Not returned yet", "Returned void", "Returned expr", so we'll just use a placeholder for now.
-                vec![(store.clone(), pct.clone(), Some(Expr::BoolLit(true)))]
+                vec![(store.clone(), pct.clone(), Some(Expr::IntLit(-42)))]
             }
             _ => vec![(store.clone(), pct.clone(), ret_val.clone())],
         }
@@ -322,6 +337,7 @@ pub fn fill_model((int_map, bool_map): &mut Model, fv: &HashSet<Var>) {
 
 pub type Model = (HashMap<String, i64>, HashMap<String, bool>);
 
+#[derive(Debug)]
 pub enum SatResult {
     Unsat,
     Unknown(String),
