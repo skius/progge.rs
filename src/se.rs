@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::ops::{Deref, DerefMut, Neg};
+use std::path::Path;
 use z3::ast::Ast;
 use z3::{Context};
 use crate::ast::*;
@@ -16,34 +17,82 @@ pub struct SymbolicStore(pub HashMap<String, Expr>);
 type PathConstraint = Expr;
 
 impl SymbolicStore {
-    fn symbolize(&self, exp: &Expr) -> Expr {
+    fn symbolize(&self, symex: &mut SymbolicExecutor, exp: &Expr, pct: &PathConstraint) -> Vec<(Expr, PathConstraint)> {
         match exp {
-            Expr::Var(v) => self.0.get(&v.elem.0).unwrap().clone(),
-            // Expr::Call(_, _) => {}
+            Expr::Var(v) => vec![(self.0.get(&v.elem.0).unwrap().clone(), pct.clone())],
+            Expr::Call(name, args) => {
+                // If we've reached recursion limit, assume `false` and underapproximate.
+                // This is equivalent to returning to paths to continue from.
+
+                // println!("Reached call with {}, loc: {:?}, pct: {}", name, name.loc, pct);
+                // println!("{:?}", symex.function_invocations);
+
+                if *symex.function_invocations.entry((name.loc, name.to_string())).or_insert(0) >= RECURSION_LIMIT {
+                    return vec![];
+                }
+                *symex.function_invocations.get_mut(&(name.loc, name.to_string())).unwrap() += 1;
+
+                // vector of (args and path contraint)
+                let symbolized_args: Vec<(Vec<Expr>, PathConstraint)> = args.iter().fold(vec![(vec![], pct.clone())], |mut acc, arg| {
+                    // transform each path in acc into N paths that have the current argument added
+                    acc.into_iter().flat_map(|(args, pct)| {
+                        self.symbolize(symex, arg, &pct).into_iter().map(|(arg_val, pct)| {
+                            let mut args = args.clone();
+                            args.push(arg_val);
+                            (args, pct)
+                        }).collect::<Vec<_>>()
+                    }).collect()
+                });
+
+                symbolized_args.into_iter().flat_map(|(args, pct)| {
+                    symex.run_func(&symex.prog.find_funcdef(name.as_str()).unwrap().clone(), args, &pct).into_iter().map(|(pct, ret_val)| {
+                        (ret_val.unwrap(), pct)
+                    })
+                }).collect()
+            }
             Expr::BinOp(op, left, right) => {
-                Expr::BinOp(
-                    op.clone(),
-                    Box::new(WL::new(self.symbolize(left), left.loc)),
-                    Box::new(WL::new(self.symbolize(right), right.loc))
-                )
+                self.symbolize(symex, left, pct).into_iter().flat_map(|(l, pl)| {
+                    self.symbolize(symex, right, &pl).into_iter().map(|(r, pr)| {
+                        (
+                            Expr::BinOp(
+                                op.clone(),
+                                Box::new(WL::new(l.clone(), left.loc)),
+                                Box::new(WL::new(r, right.loc)),
+                            ),
+                            pr
+                        )
+                    }).collect::<Vec<_>>().into_iter()
+                }).collect()
+                // Expr::BinOp(
+                //     op.clone(),
+                //     Box::new(WL::new(self.symbolize(left), left.loc)),
+                //     Box::new(WL::new(self.symbolize(right), right.loc))
+                // )
             }
             Expr::UnOp(op, inner) => {
-                Expr::UnOp(
-                    op.clone(),
-                    Box::new(WL::new(self.symbolize(inner), inner.loc))
-                )
+                self.symbolize(symex, inner, pct).into_iter().map(|(sym_exp, pct)| {
+                    (
+                        Expr::UnOp(
+                            op.clone(),
+                            Box::new(WL::new(sym_exp, inner.loc)),
+                        ),
+                        pct
+                    )
+                }).collect()
             }
             // Expr::Array(_) => {}
             // Expr::DefaultArray { .. } => {}
             // Expr::Index(_, _) => {}
-            exp => exp.clone(),
+            exp => vec![(exp.clone(), pct.clone())],
         }
     }
 
-    fn assign(&self, var: &str, exp: &Expr) -> SymbolicStore {
-        let mut new_store = self.clone();
-        new_store.0.insert(var.to_string(), self.symbolize(exp));
-        new_store
+    fn assign(&self, symex: &mut SymbolicExecutor, var: &str, exp: &Expr, pct: &PathConstraint) -> Vec<(SymbolicStore, PathConstraint)> {
+        self.symbolize(symex, exp, pct).into_iter().map(|(val, pct)| {
+            let mut new_store = self.clone();
+            new_store.0.insert(var.to_string(), val);
+            (new_store, pct)
+        }).collect()
     }
 }
 
@@ -78,38 +127,62 @@ impl Display for SymbolicStore {
     }
 }
 
-pub fn run_intra_symbolic_execution(func: &FuncDef) -> SymbolicExecutor {
+pub fn run_intra_symbolic_execution(prog: Program) -> SymbolicExecutor {
     let mut store = SymbolicStore(HashMap::new());
     let mut pct = Expr::BoolLit(true);
 
-    for (a, _) in func.params.iter() {
+    let func_start = prog.find_funcdef("analyze").unwrap().clone();
+
+    for (a, _) in func_start.params.iter() {
         store.insert(a.elem.0.clone(), Expr::Var(a.clone()));
     }
 
     let mut symex = SymbolicExecutor {
         unreachable_paths: HashMap::new(),
         testcases: HashMap::new(),
+        prog,
+        function_invocations: HashMap::new(),
     };
 
     // println!("Starting symbolic execution with state ({}, {}) ", &store, &pct);
-    let paths = symex.run_block(&func.body, (&store, &pct));
-    // println!("resulting paths:");
-    for (store, pct) in paths {
-        // println!("({}, {})", &store, &pct);
-    }
+    let paths = symex.run_block(&func_start.body, &store, &pct, &None);
 
     symex
 }
 
+pub static RECURSION_LIMIT: usize = 5;
+
+// TODO: because of mutable self, we will probably need to clone functions very often. Wasteful.
 pub struct SymbolicExecutor {
     pub unreachable_paths: HashMap<Loc, Model>,
-    pub testcases: HashMap<Loc, Vec<Model>>
+    pub testcases: HashMap<Loc, Vec<Model>>,
+    pub prog: Program,
+    pub function_invocations: HashMap<(Loc, String), usize>,
 }
 
 impl SymbolicExecutor {
+    // returns list of pct and return values
+    fn run_func(&mut self, func: &FuncDef, args: Vec<Expr>, pct: &Expr) -> Vec<(PathConstraint, Option<Expr>)> {
+        let mut new_store = SymbolicStore(HashMap::new());
+        let mut new_pct = pct.clone();
+
+        for (i, (v, _)) in func.params.iter().enumerate() {
+            new_store.insert(v.elem.0.clone(), args[i].clone());
+        }
+
+        let paths = self.run_block(&func.body, &new_store, &new_pct, &None);
+
+        paths.into_iter().map(|(_, pct, retval)| (pct, retval)).collect()
+    }
+
     // Returns the set of all possible exiting paths
-    fn run_block(&mut self, block: &Block, (store, pct): (&SymbolicStore, &PathConstraint)) -> Vec<(SymbolicStore, PathConstraint)> {
-        // First check if PCT is sat.
+    fn run_block(&mut self, block: &Block, store: &SymbolicStore, pct: &PathConstraint, ret_val: &Option<Expr>) -> Vec<(SymbolicStore, PathConstraint, Option<Expr>)> {
+        // If in this path we have already returned, then we can just break out.
+        if let Some(ret_val) = ret_val {
+            return vec![(store.clone(), pct.clone(), Some(ret_val.clone()))];
+        }
+
+        // Then check if PCT is sat.
         if satisfiable(pct).is_unsat() {
             // println!("PCT {} is not satisfiable", pct);
             return vec![];
@@ -117,47 +190,57 @@ impl SymbolicExecutor {
 
 
         block.0.iter().fold(
-            vec![(store.clone(), pct.clone())],
+            vec![(store.clone(), pct.clone(), ret_val.clone())],
             |paths, stmt| {
-                paths.iter().map(|(store, pct)| {
-                    self.run_stmt(stmt, (store, pct))
+                paths.iter().map(|(store, pct, retval)| {
+                    if retval.is_some() {
+                        // Already returned, so we short-circuit
+                        return vec![(store.clone(), pct.clone(), retval.clone())];
+                    }
+                    self.run_stmt(stmt, store, pct, retval)
                 }).flatten().collect()
             }
         )
     }
 
-    fn run_stmt(&mut self, stmt: &WithLoc<Stmt>, (store, pct): (&SymbolicStore, &PathConstraint)) -> Vec<(SymbolicStore, PathConstraint)> {
+    fn run_stmt(&mut self, stmt: &WithLoc<Stmt>, store: &SymbolicStore, pct: &PathConstraint, ret_val: &Option<Expr>) -> Vec<(SymbolicStore, PathConstraint, Option<Expr>)> {
         match &stmt.elem {
             Stmt::IfElse { cond, if_branch, else_branch } => {
-                let cond = WL::new(store.symbolize(cond), cond.loc);
-                // send help
-                let taken_pct = Expr::BinOp(WL::no_loc(BinOpcode::And), Box::new(WL::no_loc(pct.clone())), Box::new(cond.clone()));
-                let not_taken_pct = Expr::BinOp(WL::no_loc(BinOpcode::And), Box::new(WL::no_loc(pct.clone())), Box::new(WL::no_loc(Expr::UnOp(WL::no_loc(UnOpcode::Not), Box::new(cond.clone())))));
-                let mut paths_taken = self.run_block(if_branch, (store, &taken_pct));
-                let paths_not_taken = self.run_block(else_branch, (store, &not_taken_pct));
-                paths_taken.extend(paths_not_taken);
-                paths_taken
+                store.symbolize(self, cond, pct).into_iter().flat_map(|(cond_symb, pct)| {
+                    let cond = WL::new(cond_symb, cond.loc);
+                    // send help
+                    let taken_pct = Expr::BinOp(WL::no_loc(BinOpcode::And), Box::new(WL::no_loc(pct.clone())), Box::new(cond.clone()));
+                    let not_taken_pct = Expr::BinOp(WL::no_loc(BinOpcode::And), Box::new(WL::no_loc(pct.clone())), Box::new(WL::no_loc(Expr::UnOp(WL::no_loc(UnOpcode::Not), Box::new(cond.clone())))));
+                    let mut paths_taken = self.run_block(if_branch, store, &taken_pct, ret_val);
+                    let paths_not_taken = self.run_block(else_branch, store, &not_taken_pct, ret_val);
+                    paths_taken.extend(paths_not_taken);
+                    paths_taken.into_iter()
+                }).collect()
             }
             Stmt::Decl(v, exp) => {
-                vec![(store.assign(&v.elem.0, exp), pct.clone())]
+                store.assign(self, &v.elem.0, exp, pct).into_iter().map(|(store, pct)| {
+                    (store, pct, ret_val.clone())
+                }).collect()
             }
             Stmt::Assn(le, exp) => {
                 match &le.elem {
                     LocExpr::Var(v) => {
-                        let new_store = store.assign(v.as_str(), exp);
-                        vec![(new_store, pct.clone())]
+                        store.assign(self, &v.elem.0, exp, pct).into_iter().map(|(store, pct)| {
+                            (store, pct, ret_val.clone())
+                        }).collect()
                     }
                     LocExpr::Index(_, _) => {panic!("no")}
                 }
             }
             Stmt::While { .. } => panic!("While should have been removed in loop bounding"),
             Stmt::Call(name, args) if name.as_str() == "assume!" => {
+                // TODO: Will need to handle Stmt::Call in the future when arrays are supported.
                 let new_pct = Expr::BinOp(
                     WL::no_loc(BinOpcode::And),
                     Box::new(WL::no_loc(pct.clone())),
                     Box::new(args[0].clone()),
                 );
-                return vec![(store.clone(), new_pct)];
+                return vec![(store.clone(), new_pct, ret_val.clone())];
             }
             Stmt::Testcase() => {
                 // println!("testcase at loc {:?}", stmt.loc);
@@ -165,16 +248,25 @@ impl SymbolicExecutor {
                 if let SatResult::Sat(mut model) = satres {
                     self.testcases.entry(stmt.loc).or_insert(Vec::new()).push(model);
                 }
-                vec![(store.clone(), pct.clone())]
+                vec![(store.clone(), pct.clone(), ret_val.clone())]
             }
             Stmt::Unreachable() => {
                 let satres = satisfiable(&pct);
                 if let SatResult::Sat(model) = satres{
                     self.unreachable_paths.insert(stmt.loc, model);
                 }
-                vec![(store.clone(), pct.clone())]
+                vec![(store.clone(), pct.clone(), ret_val.clone())]
             }
-            _ => vec![(store.clone(), pct.clone())],
+            Stmt::Return(Some(exp)) => {
+                store.symbolize(self, exp, pct).into_iter().map(|(ret_val, pct)| {
+                    (store.clone(), pct, Some(ret_val))
+                }).collect()
+            }
+            Stmt::Return(None) => {
+                // TODO: Hmm. Option<Expr> does not distinguish between all cases, "Not returned yet", "Returned void", "Returned expr", so we'll just use a placeholder for now.
+                vec![(store.clone(), pct.clone(), Some(Expr::BoolLit(true)))]
+            }
+            _ => vec![(store.clone(), pct.clone(), ret_val.clone())],
         }
     }
 }

@@ -45,7 +45,7 @@ fn main() -> Result<(), TcError> {
     if config.print_ast {
         println!("{}", prog);
     }
-    if config.do_ai {
+    if config.do_analyze {
         let analyze = IntraProcCFG::from(&**prog.find_funcdef("analyze").unwrap());
         let ai_env = proggers::ai::run(&analyze);
         println!("{}", ai_env.graphviz());
@@ -116,57 +116,57 @@ fn main() -> Result<(), TcError> {
                     .unwrap();
             }
         }
+
+
+        // TODO: combine symex + AI results
+        let (unrolled, did_bound) = bound_loops(&*prog);
+        // if did_bound is true, then any statements about unreachability are in fact guarantees.
+        // println!("{}", unrolled);
+        let mut symex = run_intra_symbolic_execution(unrolled.clone());
+        // the symbolix variables
+        let analyze_params = unrolled.find_funcdef("analyze").unwrap().params.iter().map(|(v, _)| &v.elem);
+        let analyze_params_set = analyze_params.clone().cloned().collect();
+        // Guaranteed reachable, i.e. provably incorrect
+        let mut unreachable_paths_keys = symex.unreachable_paths.keys().cloned().collect::<Vec<_>>();
+        unreachable_paths_keys.sort_by_key(|l| l.start);
+        for loc in &unreachable_paths_keys {
+            let model = symex.unreachable_paths.get_mut(loc).unwrap();
+            fill_model(model, &analyze_params_set);
+            let model_string = string_of_model(model, analyze_params.clone());
+            Report::build(ariadne::ReportKind::Error, src_file, loc.start)
+                .with_label(
+                    Label::new(
+                        (src_file, loc.range())
+                    )
+                        .with_message(
+                            format!(
+                                "statement is reachable with the following inputs: {}",
+                                model_string.fg(Color::Red)
+                            )
+                        )
+                        .with_color(Color::Red)
+                )
+                .finish()
+                .print((src_file, Source::from(src.clone())))
+                .unwrap();
+        }
+
+        let mut testcases_keys = symex.testcases.keys().cloned().collect::<Vec<_>>();
+        testcases_keys.sort_by_key(|l| l.start);
+        for loc in &testcases_keys {
+            let models = symex.testcases.get_mut(loc).unwrap();
+            println!("-----------------------");
+            println!("{}:{}:{}: sample inputs reaching this statement:", src_file, loc.line, loc.col);
+            models.dedup();
+            for model in models {
+                fill_model(model, &analyze_params_set);
+                let model_string = string_of_model(model, analyze_params.clone());
+                println!("{}", model_string);
+            }
+        }
     }
     if let Some(output) = config.compile_target {
         proggers::compiler::compile(prog.clone().elem, &output, config.verbose);
-    }
-
-
-    // TODO: combine symex + AI results
-    let (unrolled, did_bound) = bound_loops(&*prog);
-    // if did_bound is true, then any statements about unreachability are in fact guarantees.
-    // println!("{}", unrolled);
-    let mut symex = run_intra_symbolic_execution(unrolled.find_funcdef("analyze").unwrap());
-    // the symbolix variables
-    let analyze_params = unrolled.find_funcdef("analyze").unwrap().params.iter().map(|(v, _)| &v.elem);
-    let analyze_params_set = analyze_params.clone().cloned().collect();
-    // Guaranteed reachable, i.e. provably incorrect
-    let mut unreachable_paths_keys = symex.unreachable_paths.keys().cloned().collect::<Vec<_>>();
-    unreachable_paths_keys.sort_by_key(|l| l.start);
-    for loc in &unreachable_paths_keys {
-        let model = symex.unreachable_paths.get_mut(loc).unwrap();
-        fill_model(model, &analyze_params_set);
-        let model_string = string_of_model(model, analyze_params.clone());
-        Report::build(ariadne::ReportKind::Error, src_file, loc.start)
-            .with_label(
-                Label::new(
-                    (src_file, loc.range())
-                )
-                    .with_message(
-                        format!(
-                            "statement is reachable with the following inputs: {}",
-                            model_string.fg(Color::Red)
-                        )
-                    )
-                    .with_color(Color::Red)
-            )
-            .finish()
-            .print((src_file, Source::from(src.clone())))
-            .unwrap();
-    }
-
-    let mut testcases_keys = symex.testcases.keys().cloned().collect::<Vec<_>>();
-    testcases_keys.sort_by_key(|l| l.start);
-    for loc in &testcases_keys {
-        let models = symex.testcases.get_mut(loc).unwrap();
-        println!("-----------------------");
-        println!("{}:{}:{}: inputs reaching this statement:", src_file, loc.line, loc.col);
-        models.dedup();
-        for model in models {
-            fill_model(model, &analyze_params_set);
-            let model_string = string_of_model(model, analyze_params.clone());
-            println!("{}", model_string);
-        }
     }
 
     Ok(())
@@ -177,7 +177,7 @@ struct Config {
     print_cfg: bool,
     print_ast: bool,
     do_tc: bool,
-    do_ai: bool,
+    do_analyze: bool,
     compile_target: Option<String>,
     verbose: bool,
 }
@@ -191,7 +191,7 @@ fn parse_args() -> Config {
         print_cfg: false,
         print_ast: false,
         do_tc: false,
-        do_ai: false,
+        do_analyze: false,
         compile_target: None,
         verbose: false,
     };
@@ -210,11 +210,11 @@ fn parse_args() -> Config {
                 cfg.print_cfg = true;
                 cfg.print_ast = true;
                 cfg.do_tc = true;
-                cfg.do_ai = true;
+                cfg.do_analyze = true;
             },
             "--cfg" => cfg.print_cfg = true,
             "--typecheck" | "-t" => cfg.do_tc = true,
-            "--analyze" | "-a" => cfg.do_ai = true,
+            "--analyze" | "-a" => cfg.do_analyze = true,
             "--ast" => cfg.print_ast = true,
             "--verbose" | "-v" => cfg.verbose = true,
             "--output" | "-o" => {
@@ -244,7 +244,7 @@ fn parse_args() -> Config {
     }
 
     // analyze requires typecheck
-    if cfg.do_ai && !cfg.do_tc {
+    if cfg.do_analyze && !cfg.do_tc {
         eprintln!(
             "{}: error: --analyze requires --typecheck",
             executable

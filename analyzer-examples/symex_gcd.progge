@@ -1,6 +1,10 @@
-fn analyze(x: int, y: int) {
+fn analyze(x: int, y: int, n: int) {
+    assume!(n > 15);
     if x >= 0 && y > 0 {
-        if gcd(x, y) > 10 {
+        if gcd(x, y) > n {
+            testcase!;
+        }
+        if gcd_rec(x, y) > n {
             testcase!;
         }
         return;
@@ -9,6 +13,15 @@ fn analyze(x: int, y: int) {
     return;
 }
 
+// Both a recursive GCD definition ...
+fn gcd_rec(a: int, b: int) -> int {
+    if b == 0 {
+        return a;
+    }
+    return gcd_rec(b, a % b);
+}
+
+// ... and an iterative definition work.
 fn gcd(a: int, b: int) -> int {
     let temp = 0;
     while b != 0 {
