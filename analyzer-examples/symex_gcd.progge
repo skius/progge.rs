@@ -1,11 +1,27 @@
 fn analyze(x: int, y: int, n: int) {
     assume!(n > 15);
     if x >= 0 && y > 0 {
-        if gcd(x, y) > n {
+        let gcd = gcd(x, y);
+        let gcd_rec = gcd_rec(x, y);
+
+        if gcd > n {
             testcase!;
         }
-        if gcd_rec(x, y) > n {
+        if gcd_rec > n {
             testcase!;
+        }
+
+        if gcd == gcd_rec {
+            // This is not unreachable. Although abstract interpretation's over-approximation is correct
+            // in this case, only symbolic execution can deliver a proof in form of a concrete
+            // set of input values that reach this statement.
+            unreachable!;
+        }
+
+        if gcd != gcd_rec {
+            // While this is truly unreachable, neither abstract interpretation nor symbolic execution
+            // can deliver a proof for this.
+            unreachable!;
         }
         return;
     }
