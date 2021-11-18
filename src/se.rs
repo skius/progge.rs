@@ -158,6 +158,10 @@ pub fn run_symbolic_execution(prog: Program) -> SymbolicExecutor {
         println!("Called Z3 {} times", *t.borrow());
     });
 
+    cache::CACHE.with(|c| {
+        println!("Cache contained: {:?}", c.borrow().keys().collect::<Vec<_>>());
+    });
+
 
     symex
 }
@@ -230,7 +234,7 @@ impl SymbolicExecutor {
                         return vec![(store.clone(), pct.clone(), retval.clone())];
                     }
                     self.run_stmt(stmt, store, pct, retval)
-                }).flatten().collect()
+                }).flatten().collect::<Vec<_>>()
             }
         )
     }
@@ -402,6 +406,14 @@ pub fn satisfiable(pct: &Expr) -> SatResult {
     // println!("pct orig sexp: {}", pct_sexp);
     // let bests = get_bests(vec![&pct_egg]);
     // println!("pct best sexp: {}", bests[0].to_string());
+
+    // Uncomment if you want caching (slower atm)
+    // if let Some(model) = cache::satisfiable(pct) {
+    //     println!("Cache hit! PCT: {}, model {:?}", pct, &model);
+    //     cache::insert(pct, model.clone());
+    //     return SatResult::Sat(model);
+    // }
+
     let start = SystemTime::now();
 
     let mut cfg = z3::Config::new();
@@ -419,6 +431,8 @@ pub fn satisfiable(pct: &Expr) -> SatResult {
             //     println!("egg said false, z3 didn't");
             // }
             let model = map_of_model(&ctx, solver.get_model().unwrap(), &pct.free_vars());
+            // Uncomment if you want caching (slower atm)
+            // cache::insert(pct, model.clone());
             SatResult::Sat(model)
         },
         z3::SatResult::Unsat => SatResult::Unsat,
@@ -651,4 +665,200 @@ pub fn bound_loops_stmt(stmt: &Stmt, did_bound: &mut bool) -> Stmt {
         }
         _ => stmt.clone(),
     }
+}
+
+
+// Supposed to speed up satisfiability checks
+mod cache {
+    use std::borrow::Borrow;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use crate::ast::{BinOpcode, Expr, Type, WithLoc};
+    use crate::se::Model;
+    thread_local! {
+        pub static CACHE: RefCell<HashMap<String, super::Model>> = RefCell::new(HashMap::new());
+    }
+
+    pub fn insert(exp: &Expr, model: Model) {
+        CACHE.with(|cache| {
+            cache.borrow_mut().insert(exp.to_string(), model.clone());
+        });
+
+        // Recursively insert AND'ed subexpressions, since having a model for an AND means
+        // having a model for both conjuncts.
+        match exp {
+            Expr::BinOp(op, left, right) => {
+                if op.elem == BinOpcode::And {
+                    insert(&*left, model.clone());
+                    insert(&*right, model);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn satisfiable(exp: &Expr) -> Option<Model> {
+        // let mut wl = WithLoc::no_loc(exp.clone());
+        // wl.set_type_loc(&Type::Bool);
+        satisfiable_rec(exp, 5)
+    }
+
+    fn satisfiable_rec(exp: &Expr, limit: usize) -> Option<Model> {
+        if limit <= 0 {
+            return None;
+        }
+        // As soon as we reach integers, we can stop recursing
+        // not perfectly safe, as we don't add types to the PCTs we generate during symbolic execution
+        // if exp.typ == Type::Int {
+        //     return None;
+        // }
+
+        let exp_string = exp.to_string();
+        let curr = CACHE.with(|c| {
+            c.borrow().get(&exp_string).map(|m| m.clone())
+        });
+        if let Some(model) = curr {
+            return Some(model);
+        }
+
+        match exp {
+            Expr::BoolLit(true) => Some((HashMap::new(), HashMap::new())),
+            Expr::BoolLit(false) => None,
+            Expr::Var(v) => {
+                let b_map = HashMap::from([(v.elem.to_string(), true)]);
+                Some((HashMap::new(), b_map))
+            }
+            Expr::BinOp(op, left, right) => {
+                // arg type is int
+                if op.elem.get_type().0.0 == Type::Int {
+                    return None;
+                }
+
+                let left_model = satisfiable_rec(left, limit - 1);
+
+                if let Some(left_model) = left_model {
+                    if super::interp::interp_bool(exp, &left_model) {
+                        return Some(left_model);
+                    }
+                }
+
+                let right_model = satisfiable_rec(right, limit - 1);
+
+                if let Some(right_model) = right_model {
+                    if super::interp::interp_bool(exp, &right_model) {
+                        return Some(right_model);
+                    }
+                }
+
+                None
+            }
+            Expr::UnOp(op, inner) => {
+                // arg type is int
+                if op.elem.get_type().0 == Type::Int {
+                    return None;
+                }
+
+                let inner_model = satisfiable_rec(inner, limit - 1);
+
+                if let Some(inner_model) = inner_model {
+                    if super::interp::interp_bool(exp, &inner_model) {
+                        return Some(inner_model);
+                    }
+                }
+
+                None
+            }
+            // TODO: think about how to do this better, maybe exprs need tighter integration with
+            // their types
+            // _ => None,
+            exp => panic!("Unsupported expression: {:?}", exp),
+        }
+    }
+
+}
+
+mod interp {
+    use super::Model;
+    use crate::ast::{BinOpcode, Expr, OpcodeType, Type, UnOpcode};
+
+    pub fn interp_bool(exp: &Expr, model: &Model) -> bool {
+        match exp {
+            Expr::BoolLit(b) => *b,
+            Expr::Var(v) => *model.1.get(v.as_str()).unwrap_or(&false),
+            Expr::BinOp(op, left, right)
+            if op.elem.get_type() == OpcodeType((Type::Int, Type::Int), Type::Bool)
+            => {
+                let left_val = interp_int(left, model);
+                let right_val = interp_int(right, model);
+
+                match &op.elem {
+                    BinOpcode::Lt => left_val < right_val,
+                    BinOpcode::Le => left_val <= right_val,
+                    BinOpcode::Gt => left_val > right_val,
+                    BinOpcode::Ge => left_val >= right_val,
+                    BinOpcode::Eq => left_val == right_val,
+                    BinOpcode::Ne => left_val != right_val,
+                    op => panic!("Unsupported binop: {}", op),
+                }
+
+            }
+            Expr::BinOp(op, left, right)
+            if op.elem.get_type() == OpcodeType((Type::Bool, Type::Bool), Type::Bool)
+            => {
+                let left_val = interp_bool(left, model);
+                let right_val = interp_bool(right, model);
+
+                match &op.elem {
+                    BinOpcode::And => left_val && right_val,
+                    BinOpcode::Or => left_val || right_val,
+                    op => panic!("Unsupported binop: {}", op),
+                }
+            }
+            Expr::UnOp(op, inner) => {
+                let inner_val = interp_bool(inner, model);
+
+                match &op.elem {
+                    UnOpcode::Not => !inner_val,
+                    op => panic!("Unsupported unop: {}", op),
+                }
+            }
+            // In case we call interp_bool from se::cache on an integer
+            // _ => true,
+            e => panic!("Unsupported expression: {}", e),
+        }
+    }
+
+    pub fn interp_int(exp: &Expr, model: &Model) -> i64 {
+        match exp {
+            Expr::IntLit(i) => *i,
+            Expr::Var(v) => *model.0.get(v.as_str()).unwrap_or(&0),
+            Expr::BinOp(op, left, right) => {
+                let left_val = interp_int(left, model);
+                let right_val = interp_int(right, model);
+
+                // println!("interpreting {} {} {}", left_val, &op.elem, right_val);
+
+                match &op.elem {
+                    BinOpcode::Add => left_val + right_val,
+                    BinOpcode::Sub => left_val - right_val,
+                    BinOpcode::Mul => left_val * right_val,
+                    BinOpcode::Div => left_val / right_val,
+                    // TODO: instead return Option?
+                    BinOpcode::Mod => left_val.checked_rem(right_val).unwrap_or(0),
+                    op => panic!("Unsupported binop: {}", op),
+                }
+
+            }
+            Expr::UnOp(op, inner) => {
+                let inner_val = interp_int(inner, model);
+
+                match &op.elem {
+                    UnOpcode::Neg => -inner_val,
+                    op => panic!("Unsupported unop: {}", op),
+                }
+            }
+            e => panic!("Unsupported expression: {}", e),
+        }
+    }
+
 }
