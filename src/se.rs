@@ -152,7 +152,7 @@ pub fn run_symbolic_execution(prog: Program) -> SymbolicExecutor {
     let paths = symex.run_block(&func_start.body, &store, &pct, &None);
 
     Z3_TIME.with(|t| {
-       println!("Took Z3: {}, {}", *t.borrow(), (*t.borrow())/1000);
+       println!("Took Z3: {}ms, {}s", *t.borrow(), (*t.borrow())/1000);
     });
     Z3_INVOCATIONS.with(|t| {
         println!("Called Z3 {} times", *t.borrow());
