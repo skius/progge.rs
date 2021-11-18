@@ -388,7 +388,7 @@ pub struct OpcodeType<P>(pub P, pub Type)
 where
     P: Debug + Clone + PartialEq + Eq;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum BinOpcode {
     // int * int -> int
     Add,

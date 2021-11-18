@@ -8,6 +8,7 @@ use z3::ast::Ast;
 use z3::{Context};
 use crate::ast::*;
 use crate::ir::IntraProcCFG;
+use crate::opt::{get_bests, sexp_of_expr};
 
 
 // Invariant (perhaps): Only variables in a symbolic store are the symbolic variables, e.g. obtained
@@ -396,6 +397,11 @@ thread_local! {
 }
 
 pub fn satisfiable(pct: &Expr) -> SatResult {
+    // let pct_sexp = sexp_of_expr(pct);
+    // let pct_egg = pct_sexp.parse().unwrap();
+    // println!("pct orig sexp: {}", pct_sexp);
+    // let bests = get_bests(vec![&pct_egg]);
+    // println!("pct best sexp: {}", bests[0].to_string());
     let start = SystemTime::now();
 
     let mut cfg = z3::Config::new();
@@ -409,6 +415,9 @@ pub fn satisfiable(pct: &Expr) -> SatResult {
 
     let res = match res {
         z3::SatResult::Sat => {
+            // if bests[0].to_string() == "false" {
+            //     println!("egg said false, z3 didn't");
+            // }
             let model = map_of_model(&ctx, solver.get_model().unwrap(), &pct.free_vars());
             SatResult::Sat(model)
         },
