@@ -1,0 +1,21 @@
+fn analyze(x: int, y: int, n: int) {
+    assume!(n > 25);
+    if x >= 0 && y > 0 {
+        if gcd_rec(x, y) == gcd_rec(y, x) {
+            // GCD is commutative, so this statement will always be entered.
+            unreachable!;
+            testcase!;
+        }
+
+        return;
+    }
+
+    return;
+}
+
+fn gcd_rec(a: int, b: int) -> int {
+    if b == 0 {
+        return a;
+    }
+    return gcd_rec(b, a % b);
+}

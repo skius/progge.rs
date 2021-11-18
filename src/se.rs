@@ -1,11 +1,14 @@
+use std::borrow::{Borrow, BorrowMut};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::ops::{Deref, DerefMut, Neg};
-use std::path::Path;
+use std::cell::RefCell;
+use std::time::SystemTime;
 use z3::ast::Ast;
 use z3::{Context};
 use crate::ast::*;
 use crate::ir::IntraProcCFG;
+
 
 // Invariant (perhaps): Only variables in a symbolic store are the symbolic variables, e.g. obtained
 // as arguments or from black-box function calls. The other variables should be stored as expression
@@ -127,7 +130,7 @@ impl Display for SymbolicStore {
     }
 }
 
-pub fn run_intra_symbolic_execution(prog: Program) -> SymbolicExecutor {
+pub fn run_symbolic_execution(prog: Program) -> SymbolicExecutor {
     let mut store = SymbolicStore(HashMap::new());
     let mut pct = Expr::BoolLit(true);
 
@@ -147,10 +150,18 @@ pub fn run_intra_symbolic_execution(prog: Program) -> SymbolicExecutor {
     // println!("Starting symbolic execution with state ({}, {}) ", &store, &pct);
     let paths = symex.run_block(&func_start.body, &store, &pct, &None);
 
+    Z3_TIME.with(|t| {
+       println!("Took Z3: {}, {}", *t.borrow(), (*t.borrow())/1000);
+    });
+    Z3_INVOCATIONS.with(|t| {
+        println!("Called Z3 {} times", *t.borrow());
+    });
+
+
     symex
 }
 
-pub static RECURSION_LIMIT: usize = 6;
+pub static RECURSION_LIMIT: usize = 5;
 
 // TODO: because of mutable self, we will probably need to clone functions very often. Wasteful.
 pub struct SymbolicExecutor {
@@ -163,6 +174,11 @@ pub struct SymbolicExecutor {
 impl SymbolicExecutor {
     // returns list of pct and return values
     fn run_func(&mut self, func: &FuncDef, args: Vec<Expr>, pct: &Expr) -> Vec<(PathConstraint, Option<Expr>)> {
+        // if satisfiable(pct).is_unsat() {
+        //     // println!("PCT {} is not satisfiable", pct);
+        //     return vec![];
+        // }
+
         let mut new_store = SymbolicStore(HashMap::new());
         let mut new_pct = pct.clone();
 
@@ -173,6 +189,8 @@ impl SymbolicExecutor {
         }
 
         // println!("______ running func {}", func.name.as_str());
+        // println!("pct {}", pct);
+        // println!("invocs {:?}", self.function_invocations);
         // println!("input was: {}, sat? {:?}", pct, satisfiable(pct));
         let paths = self.run_block(&func.body, &new_store, &new_pct, &None);
 
@@ -194,10 +212,11 @@ impl SymbolicExecutor {
         }
 
         // Then check if PCT is sat.
-        if satisfiable(pct).is_unsat() {
-            // println!("PCT {} is not satisfiable", pct);
-            return vec![];
-        }
+        // very inefficient to invoke Z3 for every block
+        // if satisfiable(pct).is_unsat() {
+        //     // println!("PCT {} is not satisfiable", pct);
+        //     return vec![];
+        // }
 
 
         block.0.iter().fold(
@@ -264,10 +283,14 @@ impl SymbolicExecutor {
                 vec![(store.clone(), pct.clone(), ret_val.clone())]
             }
             Stmt::Unreachable() => {
-                let satres = satisfiable(&pct);
-                if let SatResult::Sat(model) = satres{
-                    self.unreachable_paths.insert(stmt.loc, model);
+                if !self.unreachable_paths.contains_key(&stmt.loc) {
+                    // If we already have a model for an unreachable! we don't need to compute again
+                    let satres = satisfiable(&pct);
+                    if let SatResult::Sat(model) = satres{
+                        self.unreachable_paths.insert(stmt.loc, model);
+                    }
                 }
+
                 vec![(store.clone(), pct.clone(), ret_val.clone())]
             }
             Stmt::Return(Some(exp)) => {
@@ -367,7 +390,14 @@ impl SatResult {
     }
 }
 
+thread_local! {
+    pub static Z3_TIME: RefCell<u128> = RefCell::new(0);
+    pub static Z3_INVOCATIONS: RefCell<u64> = RefCell::new(0);
+}
+
 pub fn satisfiable(pct: &Expr) -> SatResult {
+    let start = SystemTime::now();
+
     let mut cfg = z3::Config::new();
     cfg.set_timeout_msec(1000);
 
@@ -377,14 +407,25 @@ pub fn satisfiable(pct: &Expr) -> SatResult {
 
     let res = solver.check();
 
-    match res {
+    let res = match res {
         z3::SatResult::Sat => {
             let model = map_of_model(&ctx, solver.get_model().unwrap(), &pct.free_vars());
             SatResult::Sat(model)
         },
         z3::SatResult::Unsat => SatResult::Unsat,
         z3::SatResult::Unknown => SatResult::Unknown(solver.get_reason_unknown().unwrap()),
-    }
+    };
+
+    let d = SystemTime::now().duration_since(start).unwrap();
+    Z3_TIME.with(|t| {
+        *t.borrow_mut() += d.as_millis();
+    });
+
+    Z3_INVOCATIONS.with(|t| {
+        *t.borrow_mut() += 1;
+    });
+
+    res
 }
 
 fn map_of_model(ctx: &z3::Context, model: z3::Model, fv: &HashSet<Var>) -> (HashMap<String, i64>, HashMap<String, bool>) {

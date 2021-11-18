@@ -9,7 +9,7 @@ use ariadne::{Color, Fmt, Label, Report, Source};
 
 use proggers::ast::*;
 use proggers::ir::IntraProcCFG;
-use proggers::se::{bound_loops, fill_model, run_intra_symbolic_execution, string_of_model};
+use proggers::se::{bound_loops, fill_model, run_symbolic_execution, string_of_model};
 
 use proggers::tc::{FuncTypeContext, TcError, TypeChecker, VariableTypeContext};
 
@@ -122,7 +122,7 @@ fn main() -> Result<(), TcError> {
         let (unrolled, did_bound) = bound_loops(&*prog);
         // if did_bound is true, then any statements about unreachability are in fact guarantees.
         // println!("{}", unrolled);
-        let mut symex = run_intra_symbolic_execution(unrolled.clone());
+        let mut symex = run_symbolic_execution(unrolled.clone());
         // the symbolix variables
         let analyze_params = unrolled.find_funcdef("analyze").unwrap().params.iter().map(|(v, _)| &v.elem);
         let analyze_params_set = analyze_params.clone().cloned().collect();
