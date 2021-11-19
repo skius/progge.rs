@@ -137,23 +137,9 @@ impl SymbolicStore {
                 // }
                 // *symex.function_invocations.get_mut(&(name.loc, name.to_string())).unwrap() += 1;
 
-                // vector of (args and path contraint)
-                let symbolized_args: Vec<(Vec<SymbolicValue>, PathConstraint, SymbolicHeap)> = args.iter().fold(vec![(vec![], pct.clone(), sym_heap.clone())], |mut acc, arg| {
-                    // transform each path in acc into N paths that have the current argument added
-                    acc.into_iter().flat_map(|(args, pct, sym_heap)| {
-                        self.symbolize(symex, arg, &pct, &sym_heap).into_iter().map(|(arg_val, pct, sym_heap)| {
-                            let mut args = args.clone();
-                            args.push(arg_val);
-                            (args, pct, sym_heap)
-                        }).collect::<Vec<_>>()
-                    }).collect()
-                });
-
-                symbolized_args.into_iter().flat_map(|(args, pct, sym_heap)| {
-                    symex.run_func(&symex.prog.find_funcdef(name.as_str()).unwrap().clone(), args, &pct, &sym_heap).into_iter().map(|(pct, sym_heap, ret_val)| {
-                        (ret_val.unwrap(), pct, sym_heap)
-                    })
-                }).collect()
+                symex.run_call(name.as_str(), args, self, pct, sym_heap, |pct, sym_heap, ret_val| {
+                    (ret_val.unwrap(), pct, sym_heap)
+                })
             }
             Expr::BinOp(op, left, right) => {
                 self.symbolize(symex, left, pct, sym_heap).into_iter().flat_map(|(l, pl, sym_heapl)| {
@@ -455,30 +441,15 @@ impl SymbolicExecutor {
                 return vec![(store.clone(), new_pct, sym_heap.clone(), ret_val.clone())];
             }
             Stmt::Call(name, args) => {
-                // TODO: dedup me with symbolize
-
                 // if *self.function_invocations.entry((name.loc, name.to_string())).or_insert(0) >= RECURSION_LIMIT {
                 //     return vec![];
                 // }
                 // *self.function_invocations.get_mut(&(name.loc, name.to_string())).unwrap() += 1;
 
-                // vector of (args and path contraint)
-                let symbolized_args: Vec<(Vec<SymbolicValue>, PathConstraint, SymbolicHeap)> = args.iter().fold(vec![(vec![], pct.clone(), sym_heap.clone())], |mut acc, arg| {
-                    // transform each path in acc into N paths that have the current argument added
-                    acc.into_iter().flat_map(|(args, pct, sym_heap)| {
-                        store.symbolize(self, arg, &pct, &sym_heap).into_iter().map(|(arg_val, pct, sym_heap)| {
-                            let mut args = args.clone();
-                            args.push(arg_val);
-                            (args, pct, sym_heap)
-                        }).collect::<Vec<_>>()
-                    }).collect()
-                });
 
-                symbolized_args.into_iter().flat_map(|(args, pct, sym_heap)| {
-                    self.run_func(&self.prog.find_funcdef(name.as_str()).unwrap().clone(), args, &pct, &sym_heap).into_iter().map(|(pct, sym_heap, _ret_val)| {
-                        (store.clone(), pct, sym_heap, ret_val.clone())
-                    })
-                }).collect()
+                self.run_call(name.as_str(), args, store, pct, sym_heap, |pct, sym_heap, _ret_val| {
+                    (store.clone(), pct, sym_heap, ret_val.clone())
+                })
             }
             Stmt::Testcase() => {
                 let satres = satisfiable(&pct);
@@ -511,6 +482,27 @@ impl SymbolicExecutor {
             }
             _ => vec![(store.clone(), pct.clone(), sym_heap.clone(), ret_val.clone())],
         }
+    }
+
+    fn run_call<F, T>(&mut self, name: &str, args: &Vec<WithLoc<Expr>>, store: &SymbolicStore, pct: &PathConstraint, sym_heap: &SymbolicHeap, f: F) -> Vec<T>
+    where F: Fn(PathConstraint, SymbolicHeap, Option<SymbolicValue>) -> T
+    {
+        let symbolized_args: Vec<(Vec<SymbolicValue>, PathConstraint, SymbolicHeap)> = args.iter().fold(vec![(vec![], pct.clone(), sym_heap.clone())], |mut acc, arg| {
+            // transform each path in acc into N paths that have the current argument added
+            acc.into_iter().flat_map(|(args, pct, sym_heap)| {
+                store.symbolize(self, arg, &pct, &sym_heap).into_iter().map(|(arg_val, pct, sym_heap)| {
+                    let mut args = args.clone();
+                    args.push(arg_val);
+                    (args, pct, sym_heap)
+                }).collect::<Vec<_>>()
+            }).collect()
+        });
+
+        symbolized_args.into_iter().flat_map(|(args, pct, sym_heap)| {
+            self.run_func(&self.prog.find_funcdef(name).unwrap().clone(), args, &pct, &sym_heap).into_iter().map(|(pct, sym_heap, ret_val)| {
+                f(pct, sym_heap, ret_val)
+            }).collect::<Vec<_>>()
+        }).collect()
     }
 
     // Takes arr expression, idx expression, symbolizes it with the given context, and returns the result of running the given
