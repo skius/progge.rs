@@ -1,6 +1,6 @@
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::{HashMap, HashSet};
-use std::fmt::Display;
+use std::fmt::{Display, Formatter};
 use std::ops::{Deref, DerefMut, Neg};
 use std::cell::RefCell;
 use std::time::SystemTime;
@@ -11,19 +11,120 @@ use crate::ir::IntraProcCFG;
 use crate::opt::{get_bests, sexp_of_expr};
 
 
+#[derive(Debug, Clone)]
+pub enum SymbolicValue {
+    Expr(Expr),
+    HeapPtr(usize),
+}
+
+impl SymbolicValue {
+    pub fn is_expr(&self) -> bool {
+        match self {
+            SymbolicValue::Expr(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_heap_ptr(&self) -> bool {
+        match self {
+            SymbolicValue::HeapPtr(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn into_expr(self) -> Option<Expr> {
+        match self {
+            SymbolicValue::Expr(e) => Some(e),
+            _ => None,
+        }
+    }
+
+    pub fn into_heap_ptr(self) -> Option<usize> {
+        match self {
+            SymbolicValue::HeapPtr(i) => Some(i),
+            _ => None,
+        }
+    }
+}
+
+impl Display for SymbolicValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SymbolicValue::Expr(e) => write!(f, "{}", e),
+            SymbolicValue::HeapPtr(ptr) => write!(f, "{}", ptr),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SymbolicHeap(pub HashMap<usize, HashMap<Expr, SymbolicValue>>);
+
+impl SymbolicHeap {
+    pub fn new_ptr(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl Display for SymbolicHeap {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{{")?;
+        let mut first = true;
+        for (k, v) in self.0.iter() {
+            if first {
+                first = false;
+            } else {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}: ", k,)?;
+            display_symbolic_arr(v, f)?;
+        }
+        write!(f, "}}")?;
+        Ok(())
+    }
+}
+
+fn display_symbolic_arr(arr: &HashMap<Expr, SymbolicValue>, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    write!(f, "{{")?;
+    let mut first = true;
+    for (k, v) in arr.iter() {
+        if first {
+            first = false;
+        } else {
+            write!(f, ", ")?;
+        }
+        write!(f, "{} -> {}", k, v)?;
+    }
+    write!(f, "}}")?;
+    Ok(())
+}
+
+impl Deref for SymbolicHeap {
+    type Target = HashMap<usize, HashMap<Expr, SymbolicValue>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for SymbolicHeap {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 // Invariant (perhaps): Only variables in a symbolic store are the symbolic variables, e.g. obtained
 // as arguments or from black-box function calls. The other variables should be stored as expression
 // of the symbolic variables.
 #[derive(Clone, Debug)]
-pub struct SymbolicStore(pub HashMap<String, Expr>);
+pub struct SymbolicStore(pub HashMap<String, SymbolicValue>);
 
 // pub struct PathConstraint(pub Expr);
 type PathConstraint = Expr;
 
 impl SymbolicStore {
-    fn symbolize(&self, symex: &mut SymbolicExecutor, exp: &Expr, pct: &PathConstraint) -> Vec<(Expr, PathConstraint)> {
+    fn symbolize(&self, symex: &mut SymbolicExecutor, exp: &Expr, pct: &PathConstraint, sym_heap: &SymbolicHeap) -> Vec<(SymbolicValue, PathConstraint, SymbolicHeap)> {
         match exp {
-            Expr::Var(v) => vec![(self.0.get(&v.elem.0).unwrap().clone(), pct.clone())],
+            Expr::Var(v) => vec![(self.0.get(&v.elem.0).unwrap().clone(), pct.clone(), sym_heap.clone())],
             Expr::Call(name, args) => {
                 // If we've reached recursion limit, assume `false` and underapproximate.
                 // This is equivalent to returning to paths to continue from.
@@ -31,39 +132,40 @@ impl SymbolicStore {
                 // println!("Reached call with {}, loc: {:?}, pct: {}", name, name.loc, pct);
                 // println!("{:?}", symex.function_invocations);
 
-                if *symex.function_invocations.entry((name.loc, name.to_string())).or_insert(0) >= RECURSION_LIMIT {
-                    return vec![];
-                }
-                *symex.function_invocations.get_mut(&(name.loc, name.to_string())).unwrap() += 1;
+                // if *symex.function_invocations.entry((name.loc, name.to_string())).or_insert(0) >= RECURSION_LIMIT {
+                //     return vec![];
+                // }
+                // *symex.function_invocations.get_mut(&(name.loc, name.to_string())).unwrap() += 1;
 
                 // vector of (args and path contraint)
-                let symbolized_args: Vec<(Vec<Expr>, PathConstraint)> = args.iter().fold(vec![(vec![], pct.clone())], |mut acc, arg| {
+                let symbolized_args: Vec<(Vec<SymbolicValue>, PathConstraint, SymbolicHeap)> = args.iter().fold(vec![(vec![], pct.clone(), sym_heap.clone())], |mut acc, arg| {
                     // transform each path in acc into N paths that have the current argument added
-                    acc.into_iter().flat_map(|(args, pct)| {
-                        self.symbolize(symex, arg, &pct).into_iter().map(|(arg_val, pct)| {
+                    acc.into_iter().flat_map(|(args, pct, sym_heap)| {
+                        self.symbolize(symex, arg, &pct, &sym_heap).into_iter().map(|(arg_val, pct, sym_heap)| {
                             let mut args = args.clone();
                             args.push(arg_val);
-                            (args, pct)
+                            (args, pct, sym_heap)
                         }).collect::<Vec<_>>()
                     }).collect()
                 });
 
-                symbolized_args.into_iter().flat_map(|(args, pct)| {
-                    symex.run_func(&symex.prog.find_funcdef(name.as_str()).unwrap().clone(), args, &pct).into_iter().map(|(pct, ret_val)| {
-                        (ret_val.unwrap(), pct)
+                symbolized_args.into_iter().flat_map(|(args, pct, sym_heap)| {
+                    symex.run_func(&symex.prog.find_funcdef(name.as_str()).unwrap().clone(), args, &pct, &sym_heap).into_iter().map(|(pct, sym_heap, ret_val)| {
+                        (ret_val.unwrap(), pct, sym_heap)
                     })
                 }).collect()
             }
             Expr::BinOp(op, left, right) => {
-                self.symbolize(symex, left, pct).into_iter().flat_map(|(l, pl)| {
-                    self.symbolize(symex, right, &pl).into_iter().map(|(r, pr)| {
+                self.symbolize(symex, left, pct, sym_heap).into_iter().flat_map(|(l, pl, sym_heapl)| {
+                    self.symbolize(symex, right, &pl, &sym_heapl).into_iter().map(|(r, pr, sym_heapr)| {
                         (
-                            Expr::BinOp(
+                            SymbolicValue::Expr(Expr::BinOp(
                                 op.clone(),
-                                Box::new(WL::new(l.clone(), left.loc)),
-                                Box::new(WL::new(r, right.loc)),
-                            ),
-                            pr
+                                Box::new(WL::new(l.clone().into_expr().unwrap(), left.loc)),
+                                Box::new(WL::new(r.into_expr().unwrap(), right.loc)),
+                            )),
+                            pr,
+                            sym_heapr,
                         )
                     }).collect::<Vec<_>>().into_iter()
                 }).collect()
@@ -74,34 +176,112 @@ impl SymbolicStore {
                 // )
             }
             Expr::UnOp(op, inner) => {
-                self.symbolize(symex, inner, pct).into_iter().map(|(sym_exp, pct)| {
+                self.symbolize(symex, inner, pct, sym_heap).into_iter().map(|(sym_exp, pct, sym_heap)| {
                     (
-                        Expr::UnOp(
+                        SymbolicValue::Expr(Expr::UnOp(
                             op.clone(),
-                            Box::new(WL::new(sym_exp, inner.loc)),
-                        ),
-                        pct
+                            Box::new(WL::new(sym_exp.into_expr().unwrap(), inner.loc)),
+                        )),
+                        pct,
+                        sym_heap,
                     )
                 }).collect()
             }
-            // Expr::Array(_) => {}
+            Expr::Array(exps) => {
+                /*
+                Arrays point into the SymbolicHeap. SymbolicHeap: usize -> (Expr -> SymbolicValue), i.e.
+                a map from some pointer (an ID) to an array represented as a mapping from indices to symbolic values.
+                These mappings need to be sanitized in the sense that all path constraints must make sure that
+                the indices are disjoint, i.e. if an array is (Var(n) -> Int(0), Var(m) -> Int(1)) then n!=m must be in the PCT.
+
+                */
+
+                let arr_len = exps.len();
+
+                let folded = exps.iter().fold(
+                    vec![(vec![], (pct.clone(), sym_heap.clone()))],
+                    |acc, exp| {
+                        acc.into_iter().flat_map(|(sym_args, (pct, sym_heap))| {
+                            self.symbolize(symex, exp, &pct, &sym_heap).into_iter().map(|(sym_exp, pct, sym_heap)| {
+                                let mut sym_args = sym_args.clone();
+                                sym_args.push(sym_exp);
+
+                                (sym_args, (pct, sym_heap))
+                            }).collect::<Vec<_>>()
+                        }).collect()
+                    }
+                );
+
+                folded.into_iter().map(|(sym_args, (pct, mut sym_heap))| {
+                    debug_assert!(sym_args.len() == arr_len);
+
+                    let ptr = sym_heap.new_ptr();
+
+                    for (i, sym_arg) in sym_args.into_iter().enumerate() {
+                        sym_heap.entry(ptr).or_insert(HashMap::new()).insert(Expr::IntLit(i as i64), sym_arg);
+                    }
+
+                    (SymbolicValue::HeapPtr(ptr), pct, sym_heap)
+                }).collect()
+            }
+            // TODO: Default array. needs a different representation in SymbolicHeap I assume.
             // Expr::DefaultArray { .. } => {}
-            // Expr::Index(_, _) => {}
-            exp => vec![(exp.clone(), pct.clone())],
+            Expr::Index(arr, idx) => {
+                /*
+                1. arr must be HeapPtr.
+                2. for every possible entry in SymbolicStore[arr], add pct idx == entry_idx.
+                */
+
+                self.symbolize(symex, arr, pct, sym_heap).into_iter().flat_map(|(sym_arr, pct, sym_heap)| {
+                    // 1. sym_arr must be heap_ptr.
+                    let sym_arr = sym_arr.into_heap_ptr().unwrap();
+                    self.symbolize(symex, idx, &pct, &sym_heap).into_iter().flat_map(|(sym_idx, pct, sym_heap)| {
+                        // 2. sym_idx must be an Expr.
+                        let sym_idx = sym_idx.into_expr().unwrap();
+
+                        // Now assume every possible value for sym_idx, then return the corresponding value
+
+                        // Case distinction on whether sym_idx is constant or not, saves Z3 invocations
+                        match &sym_idx {
+                            sym_idx@Expr::IntLit(_) => {
+                                return vec![(sym_heap[&sym_arr][sym_idx].clone(), pct, sym_heap)];
+                            }
+                            _ => {}
+                        }
+
+                        let arr_map = sym_heap.get(&sym_arr).unwrap();
+                        arr_map.keys().map(|idx_exp| {
+                            let pct_with_idx_assmpt = Expr::BinOp(
+                                WL::no_loc(BinOpcode::And),
+                                Box::new(WL::no_loc(pct.clone())),
+                                Box::new(WL::no_loc(Expr::BinOp(
+                                    WL::no_loc(BinOpcode::Eq),
+                                    Box::new(WL::no_loc(sym_idx.clone())),
+                                    Box::new(WL::no_loc(idx_exp.clone()))
+                                )))
+                            );
+
+                            (arr_map[idx_exp].clone(), pct_with_idx_assmpt, sym_heap.clone())
+                        }).collect::<Vec<_>>()
+
+                    }).collect::<Vec<_>>()
+                }).collect()
+            }
+            exp => vec![(SymbolicValue::Expr(exp.clone()), pct.clone(), sym_heap.clone())],
         }
     }
 
-    fn assign(&self, symex: &mut SymbolicExecutor, var: &str, exp: &Expr, pct: &PathConstraint) -> Vec<(SymbolicStore, PathConstraint)> {
-        self.symbolize(symex, exp, pct).into_iter().map(|(val, pct)| {
+    fn assign(&self, symex: &mut SymbolicExecutor, var: &str, exp: &Expr, pct: &PathConstraint, sym_heap: &SymbolicHeap) -> Vec<(SymbolicStore, PathConstraint, SymbolicHeap)> {
+        self.symbolize(symex, exp, pct, sym_heap).into_iter().map(|(val, pct, sym_heap)| {
             let mut new_store = self.clone();
             new_store.0.insert(var.to_string(), val);
-            (new_store, pct)
+            (new_store, pct, sym_heap)
         }).collect()
     }
 }
 
 impl Deref for SymbolicStore {
-    type Target = HashMap<String, Expr>;
+    type Target = HashMap<String, SymbolicValue>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -138,7 +318,7 @@ pub fn run_symbolic_execution(prog: Program) -> SymbolicExecutor {
     let func_start = prog.find_funcdef("analyze").unwrap().clone();
 
     for (a, _) in func_start.params.iter() {
-        store.insert(a.elem.0.clone(), Expr::Var(a.clone()));
+        store.insert(a.elem.0.clone(), SymbolicValue::Expr(Expr::Var(a.clone())));
     }
 
     let mut symex = SymbolicExecutor {
@@ -148,8 +328,23 @@ pub fn run_symbolic_execution(prog: Program) -> SymbolicExecutor {
         function_invocations: HashMap::new(),
     };
 
+    let sym_heap = SymbolicHeap(HashMap::new());
+
     // println!("Starting symbolic execution with state ({}, {}) ", &store, &pct);
-    let paths = symex.run_block(&func_start.body, &store, &pct, &None);
+    let paths = symex.run_block(&func_start.body, &store, &pct, &sym_heap, &None);
+
+    // for (sym_store, pct, sym_heap, ret_val) in paths {
+    //     if !satisfiable(&pct).is_sat() {
+    //         continue;
+    //     }
+    //
+    //     println!("\nResulting path:");
+    //     println!("store: {}", sym_store);
+    //     println!("pct: {}", pct);
+    //     println!("heap: {}", sym_heap);
+    //     println!("ret: {:?}", ret_val);
+    // }
+    // println!();
 
     Z3_TIME.with(|t| {
        println!("Took Z3: {}ms, {}s", *t.borrow(), (*t.borrow())/1000);
@@ -178,16 +373,26 @@ pub struct SymbolicExecutor {
 
 impl SymbolicExecutor {
     // returns list of pct and return values
-    fn run_func(&mut self, func: &FuncDef, args: Vec<Expr>, pct: &Expr) -> Vec<(PathConstraint, Option<Expr>)> {
+    fn run_func(&mut self, func: &FuncDef, args: Vec<SymbolicValue>, pct: &Expr, sym_heap: &SymbolicHeap) -> Vec<(PathConstraint, SymbolicHeap, Option<SymbolicValue>)> {
         // if satisfiable(pct).is_unsat() {
         //     // println!("PCT {} is not satisfiable", pct);
         //     return vec![];
         // }
 
         let mut new_store = SymbolicStore(HashMap::new());
+        // TODO: remove new_pct, don't think it's necessary
         let mut new_pct = pct.clone();
 
         let recs_prev = self.function_invocations.clone();
+
+        // The reason we modify here, is because only for the current function scope do we want to increase
+        // the recursion depth. if we do it outside, then we're changing the depth ("the no. of times we called the function")
+        // for all paths.
+        // TODO: improve Loc stuff here
+        if *self.function_invocations.entry((WL::no_loc(()).loc, func.name.to_string())).or_insert(0) >= RECURSION_LIMIT {
+            return vec![];
+        }
+        *self.function_invocations.get_mut(&(WL::no_loc(()).loc, func.name.to_string())).unwrap() += 1;
 
         for (i, (v, _)) in func.params.iter().enumerate() {
             new_store.insert(v.elem.0.clone(), args[i].clone());
@@ -197,23 +402,23 @@ impl SymbolicExecutor {
         // println!("pct {}", pct);
         // println!("invocs {:?}", self.function_invocations);
         // println!("input was: {}, sat? {:?}", pct, satisfiable(pct));
-        let paths = self.run_block(&func.body, &new_store, &new_pct, &None);
+        let paths = self.run_block(&func.body, &new_store, &new_pct, sym_heap, &None);
 
         // // TODO: why is a sat input producing no outputs?
-        // println!("{:?}\n", &paths);
+        // println!("{}\n", &paths.len());
 
         // Need to restore function invocations - we count "recursion-depth", not how many times we call a function in total.
         self.function_invocations = recs_prev;
 
-        paths.into_iter().map(|(_, pct, retval)| (pct, retval)).collect()
+        paths.into_iter().map(|(_, pct, sym_heap, retval)| (pct, sym_heap, retval)).collect()
     }
 
     // Returns the set of all possible exiting paths
-    fn run_block(&mut self, block: &Block, store: &SymbolicStore, pct: &PathConstraint, ret_val: &Option<Expr>) -> Vec<(SymbolicStore, PathConstraint, Option<Expr>)> {
+    fn run_block(&mut self, block: &Block, store: &SymbolicStore, pct: &PathConstraint, sym_heap: &SymbolicHeap, ret_val: &Option<SymbolicValue>) -> Vec<(SymbolicStore, PathConstraint, SymbolicHeap, Option<SymbolicValue>)> {
         // If in this path we have already returned, then we can just break out.
         if let Some(ret_val) = ret_val {
             // println!("already returned {}", ret_val);
-            return vec![(store.clone(), pct.clone(), Some(ret_val.clone()))];
+            return vec![(store.clone(), pct.clone(), sym_heap.clone(), Some(ret_val.clone()))];
         }
 
         // Then check if PCT is sat.
@@ -225,67 +430,141 @@ impl SymbolicExecutor {
 
 
         block.0.iter().fold(
-            vec![(store.clone(), pct.clone(), ret_val.clone())],
+            vec![(store.clone(), pct.clone(), sym_heap.clone(), ret_val.clone())],
             |paths, stmt| {
-                paths.iter().map(|(store, pct, retval)| {
+                paths.iter().map(|(store, pct, sym_heap, retval)| {
                     if retval.is_some() {
                         // Already returned, so we short-circuit
                         // println!("already returned before execing {} : {}", stmt.clone(), retval.clone().unwrap());
-                        return vec![(store.clone(), pct.clone(), retval.clone())];
+                        return vec![(store.clone(), pct.clone(), sym_heap.clone(), retval.clone())];
                     }
-                    self.run_stmt(stmt, store, pct, retval)
+                    self.run_stmt(stmt, store, pct, sym_heap, retval)
                 }).flatten().collect::<Vec<_>>()
             }
         )
     }
 
-    fn run_stmt(&mut self, stmt: &WithLoc<Stmt>, store: &SymbolicStore, pct: &PathConstraint, ret_val: &Option<Expr>) -> Vec<(SymbolicStore, PathConstraint, Option<Expr>)> {
+    fn run_stmt(&mut self, stmt: &WithLoc<Stmt>, store: &SymbolicStore, pct: &PathConstraint, sym_heap: &SymbolicHeap, ret_val: &Option<SymbolicValue>) -> Vec<(SymbolicStore, PathConstraint, SymbolicHeap, Option<SymbolicValue>)> {
         match &stmt.elem {
             Stmt::IfElse { cond, if_branch, else_branch } => {
-                store.symbolize(self, cond, pct).into_iter().flat_map(|(cond_symb, pct)| {
-                    let cond = WL::new(cond_symb, cond.loc);
+                store.symbolize(self, cond, pct, sym_heap).into_iter().flat_map(|(cond_symb, pct, sym_heap)| {
+                    let cond = WL::new(cond_symb.into_expr().unwrap(), cond.loc);
                     // send help
                     let taken_pct = Expr::BinOp(WL::no_loc(BinOpcode::And), Box::new(WL::no_loc(pct.clone())), Box::new(cond.clone()));
                     let not_taken_pct = Expr::BinOp(WL::no_loc(BinOpcode::And), Box::new(WL::no_loc(pct.clone())), Box::new(WL::no_loc(Expr::UnOp(WL::no_loc(UnOpcode::Not), Box::new(cond.clone())))));
-                    let mut paths_taken = self.run_block(if_branch, store, &taken_pct, ret_val);
-                    let paths_not_taken = self.run_block(else_branch, store, &not_taken_pct, ret_val);
+                    let mut paths_taken = self.run_block(if_branch, store, &taken_pct, &sym_heap, ret_val);
+                    let paths_not_taken = self.run_block(else_branch, store, &not_taken_pct, &sym_heap, ret_val);
                     paths_taken.extend(paths_not_taken);
                     paths_taken.into_iter()
                 }).collect()
             }
             Stmt::Decl(v, exp) => {
-                store.assign(self, &v.elem.0, exp, pct).into_iter().map(|(store, pct)| {
+                store.assign(self, &v.elem.0, exp, pct, sym_heap).into_iter().map(|(store, pct, sym_heap)| {
                     // println!("decl exp: {}, pct: {}, ret {:?}", exp, pct, ret_val);
                     // println!("satres: {:?}", satisfiable(&pct));
-                    (store, pct, ret_val.clone())
+                    (store, pct, sym_heap, ret_val.clone())
                 }).collect()
             }
             Stmt::Assn(le, exp) => {
                 match &le.elem {
                     LocExpr::Var(v) => {
-                        store.assign(self, &v.elem.0, exp, pct).into_iter().map(|(store, pct)| {
-                            (store, pct, ret_val.clone())
+                        store.assign(self, &v.elem.0, exp, pct, sym_heap).into_iter().map(|(store, pct, sym_heap)| {
+                            (store, pct, sym_heap, ret_val.clone())
                         }).collect()
                     }
-                    LocExpr::Index(_, _) => {panic!("no")}
+                    LocExpr::Index(arr, idx) => {
+                        // TODO: perhaps factor this out into a helper function? similar code is used for Index in symbolize
+                        store.symbolize(self, arr, pct, sym_heap).into_iter().flat_map(|(sym_arr, pct, sym_heap)| {
+                            // 1. sym_arr must be heap_ptr.
+                            let sym_arr = sym_arr.into_heap_ptr().unwrap();
+                            store.symbolize(self, idx, &pct, &sym_heap).into_iter().flat_map(|(sym_idx, pct, sym_heap)| {
+                                // 2. sym_idx must be an Expr.
+                                let sym_idx = sym_idx.into_expr().unwrap();
+                                store.symbolize(self, exp, &pct, &sym_heap).into_iter().flat_map(|(sym_exp, pct, mut sym_heap)| {
+                                    // Now assume every possible value for sym_idx, then change it to sym_exp.
+
+                                    // TODO: additionally assume out of bounds, see if that's satisfiable, if so throw warning
+
+                                    // Case distinction on whether sym_idx is constant or not, saves Z3 invocations
+                                    // TODO: check out of bounds?
+                                    // TODO: what if heap already contains e.g. x and in pct we have x = 0,
+                                    // then we would have duplicate elements in the heap if we insert with the constant index 0
+                                    // hence we must first check if the heap contains the constant index, otherwise we just do the same thing
+                                    // need to fix this.
+                                    match &sym_idx {
+                                        sym_idx@Expr::IntLit(_) => {
+                                            sym_heap.get_mut(&sym_arr).unwrap().insert(sym_idx.clone(), sym_exp);
+                                            return vec![(store.clone(), pct, sym_heap, ret_val.clone())];
+                                        }
+                                        _ => {}
+                                    }
+
+                                    let arr_map = sym_heap.get(&sym_arr).unwrap();
+                                    arr_map.keys().map(|idx_exp| {
+                                        let pct_with_idx_assmpt = Expr::BinOp(
+                                            WL::no_loc(BinOpcode::And),
+                                            Box::new(WL::no_loc(pct.clone())),
+                                            Box::new(WL::no_loc(Expr::BinOp(
+                                                WL::no_loc(BinOpcode::Eq),
+                                                Box::new(WL::no_loc(sym_idx.clone())),
+                                                Box::new(WL::no_loc(idx_exp.clone()))
+                                            )))
+                                        );
+
+                                        let mut new_sym_heap = sym_heap.clone();
+                                        new_sym_heap.get_mut(&sym_arr).unwrap().insert(idx_exp.clone(), sym_exp.clone());
+
+                                        (store.clone(), pct_with_idx_assmpt, new_sym_heap, ret_val.clone())
+                                    }).collect::<Vec<_>>()
+                                }).collect::<Vec<_>>()
+                            }).collect::<Vec<_>>()
+                        }).collect()
+                    }
                 }
             }
             Stmt::While { .. } => panic!("While should have been removed in loop bounding"),
             Stmt::Call(name, args) if name.as_str() == "assume!" => {
                 // TODO: Will need to handle Stmt::Call in the future when arrays are supported.
+                // TODO: that's now. Do it.
                 let new_pct = Expr::BinOp(
                     WL::no_loc(BinOpcode::And),
                     Box::new(WL::no_loc(pct.clone())),
                     Box::new(args[0].clone()),
                 );
-                return vec![(store.clone(), new_pct, ret_val.clone())];
+                return vec![(store.clone(), new_pct, sym_heap.clone(), ret_val.clone())];
+            }
+            Stmt::Call(name, args) => {
+                // TODO: dedup me with symbolize
+
+                // if *self.function_invocations.entry((name.loc, name.to_string())).or_insert(0) >= RECURSION_LIMIT {
+                //     return vec![];
+                // }
+                // *self.function_invocations.get_mut(&(name.loc, name.to_string())).unwrap() += 1;
+
+                // vector of (args and path contraint)
+                let symbolized_args: Vec<(Vec<SymbolicValue>, PathConstraint, SymbolicHeap)> = args.iter().fold(vec![(vec![], pct.clone(), sym_heap.clone())], |mut acc, arg| {
+                    // transform each path in acc into N paths that have the current argument added
+                    acc.into_iter().flat_map(|(args, pct, sym_heap)| {
+                        store.symbolize(self, arg, &pct, &sym_heap).into_iter().map(|(arg_val, pct, sym_heap)| {
+                            let mut args = args.clone();
+                            args.push(arg_val);
+                            (args, pct, sym_heap)
+                        }).collect::<Vec<_>>()
+                    }).collect()
+                });
+
+                symbolized_args.into_iter().flat_map(|(args, pct, sym_heap)| {
+                    self.run_func(&self.prog.find_funcdef(name.as_str()).unwrap().clone(), args, &pct, &sym_heap).into_iter().map(|(pct, sym_heap, _ret_val)| {
+                        (store.clone(), pct, sym_heap, ret_val.clone())
+                    })
+                }).collect()
             }
             Stmt::Testcase() => {
                 let satres = satisfiable(&pct);
                 if let SatResult::Sat(mut model) = satres {
                     self.testcases.entry(stmt.loc).or_insert(Vec::new()).push(model);
                 }
-                vec![(store.clone(), pct.clone(), ret_val.clone())]
+                vec![(store.clone(), pct.clone(), sym_heap.clone(), ret_val.clone())]
             }
             Stmt::Unreachable() => {
                 if !self.unreachable_paths.contains_key(&stmt.loc) {
@@ -296,20 +575,20 @@ impl SymbolicExecutor {
                     }
                 }
 
-                vec![(store.clone(), pct.clone(), ret_val.clone())]
+                vec![(store.clone(), pct.clone(), sym_heap.clone(), ret_val.clone())]
             }
             Stmt::Return(Some(exp)) => {
                 // println!("Returning {}, store: {:?}", exp, store);
-                store.symbolize(self, exp, pct).into_iter().map(|(ret_val, pct)| {
+                store.symbolize(self, exp, pct, sym_heap).into_iter().map(|(ret_val, pct, sym_heap)| {
                     // println!("Returning {}", &ret_val);
-                    (store.clone(), pct, Some(ret_val))
+                    (store.clone(), pct, sym_heap, Some(ret_val))
                 }).collect()
             }
             Stmt::Return(None) => {
                 // TODO: Hmm. Option<Expr> does not distinguish between all cases, "Not returned yet", "Returned void", "Returned expr", so we'll just use a placeholder for now.
-                vec![(store.clone(), pct.clone(), Some(Expr::IntLit(-42)))]
+                vec![(store.clone(), pct.clone(), sym_heap.clone(), Some(SymbolicValue::Expr(Expr::IntLit(-42))))]
             }
-            _ => vec![(store.clone(), pct.clone(), ret_val.clone())],
+            _ => vec![(store.clone(), pct.clone(), sym_heap.clone(), ret_val.clone())],
         }
     }
 }
