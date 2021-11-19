@@ -227,45 +227,9 @@ impl SymbolicStore {
             // TODO: Default array. needs a different representation in SymbolicHeap I assume.
             // Expr::DefaultArray { .. } => {}
             Expr::Index(arr, idx) => {
-                /*
-                1. arr must be HeapPtr.
-                2. for every possible entry in SymbolicStore[arr], add pct idx == entry_idx.
-                */
-
-                self.symbolize(symex, arr, pct, sym_heap).into_iter().flat_map(|(sym_arr, pct, sym_heap)| {
-                    // 1. sym_arr must be heap_ptr.
-                    let sym_arr = sym_arr.into_heap_ptr().unwrap();
-                    self.symbolize(symex, idx, &pct, &sym_heap).into_iter().flat_map(|(sym_idx, pct, sym_heap)| {
-                        // 2. sym_idx must be an Expr.
-                        let sym_idx = sym_idx.into_expr().unwrap();
-
-                        // Now assume every possible value for sym_idx, then return the corresponding value
-
-                        // Case distinction on whether sym_idx is constant or not, saves Z3 invocations
-                        match &sym_idx {
-                            sym_idx@Expr::IntLit(_) => {
-                                return vec![(sym_heap[&sym_arr][sym_idx].clone(), pct, sym_heap)];
-                            }
-                            _ => {}
-                        }
-
-                        let arr_map = sym_heap.get(&sym_arr).unwrap();
-                        arr_map.keys().map(|idx_exp| {
-                            let pct_with_idx_assmpt = Expr::BinOp(
-                                WL::no_loc(BinOpcode::And),
-                                Box::new(WL::no_loc(pct.clone())),
-                                Box::new(WL::no_loc(Expr::BinOp(
-                                    WL::no_loc(BinOpcode::Eq),
-                                    Box::new(WL::no_loc(sym_idx.clone())),
-                                    Box::new(WL::no_loc(idx_exp.clone()))
-                                )))
-                            );
-
-                            (arr_map[idx_exp].clone(), pct_with_idx_assmpt, sym_heap.clone())
-                        }).collect::<Vec<_>>()
-
-                    }).collect::<Vec<_>>()
-                }).collect()
+                symex.run_index(arr, idx, self, pct, sym_heap, |symex, sym_arr, sym_idx, pct, sym_heap| {
+                    vec![(sym_heap[&sym_arr][&sym_idx].clone(), pct.clone(), sym_heap.clone())]
+                })
             }
             exp => vec![(SymbolicValue::Expr(exp.clone()), pct.clone(), sym_heap.clone())],
         }
@@ -380,8 +344,6 @@ impl SymbolicExecutor {
         // }
 
         let mut new_store = SymbolicStore(HashMap::new());
-        // TODO: remove new_pct, don't think it's necessary
-        let mut new_pct = pct.clone();
 
         let recs_prev = self.function_invocations.clone();
 
@@ -402,9 +364,8 @@ impl SymbolicExecutor {
         // println!("pct {}", pct);
         // println!("invocs {:?}", self.function_invocations);
         // println!("input was: {}, sat? {:?}", pct, satisfiable(pct));
-        let paths = self.run_block(&func.body, &new_store, &new_pct, sym_heap, &None);
+        let paths = self.run_block(&func.body, &new_store, &pct, sym_heap, &None);
 
-        // // TODO: why is a sat input producing no outputs?
         // println!("{}\n", &paths.len());
 
         // Need to restore function invocations - we count "recursion-depth", not how many times we call a function in total.
@@ -473,52 +434,12 @@ impl SymbolicExecutor {
                         }).collect()
                     }
                     LocExpr::Index(arr, idx) => {
-                        // TODO: perhaps factor this out into a helper function? similar code is used for Index in symbolize
-                        store.symbolize(self, arr, pct, sym_heap).into_iter().flat_map(|(sym_arr, pct, sym_heap)| {
-                            // 1. sym_arr must be heap_ptr.
-                            let sym_arr = sym_arr.into_heap_ptr().unwrap();
-                            store.symbolize(self, idx, &pct, &sym_heap).into_iter().flat_map(|(sym_idx, pct, sym_heap)| {
-                                // 2. sym_idx must be an Expr.
-                                let sym_idx = sym_idx.into_expr().unwrap();
-                                store.symbolize(self, exp, &pct, &sym_heap).into_iter().flat_map(|(sym_exp, pct, mut sym_heap)| {
-                                    // Now assume every possible value for sym_idx, then change it to sym_exp.
-
-                                    // TODO: additionally assume out of bounds, see if that's satisfiable, if so throw warning
-
-                                    // Case distinction on whether sym_idx is constant or not, saves Z3 invocations
-                                    // TODO: check out of bounds?
-                                    // TODO: what if heap already contains e.g. x and in pct we have x = 0,
-                                    // then we would have duplicate elements in the heap if we insert with the constant index 0
-                                    // hence we must first check if the heap contains the constant index, otherwise we just do the same thing
-                                    // need to fix this.
-                                    match &sym_idx {
-                                        sym_idx@Expr::IntLit(_) => {
-                                            sym_heap.get_mut(&sym_arr).unwrap().insert(sym_idx.clone(), sym_exp);
-                                            return vec![(store.clone(), pct, sym_heap, ret_val.clone())];
-                                        }
-                                        _ => {}
-                                    }
-
-                                    let arr_map = sym_heap.get(&sym_arr).unwrap();
-                                    arr_map.keys().map(|idx_exp| {
-                                        let pct_with_idx_assmpt = Expr::BinOp(
-                                            WL::no_loc(BinOpcode::And),
-                                            Box::new(WL::no_loc(pct.clone())),
-                                            Box::new(WL::no_loc(Expr::BinOp(
-                                                WL::no_loc(BinOpcode::Eq),
-                                                Box::new(WL::no_loc(sym_idx.clone())),
-                                                Box::new(WL::no_loc(idx_exp.clone()))
-                                            )))
-                                        );
-
-                                        let mut new_sym_heap = sym_heap.clone();
-                                        new_sym_heap.get_mut(&sym_arr).unwrap().insert(idx_exp.clone(), sym_exp.clone());
-
-                                        (store.clone(), pct_with_idx_assmpt, new_sym_heap, ret_val.clone())
-                                    }).collect::<Vec<_>>()
-                                }).collect::<Vec<_>>()
-                            }).collect::<Vec<_>>()
-                        }).collect()
+                        self.run_index(arr, idx, store, pct, sym_heap, |symex, sym_arr, sym_idx, pct, sym_heap| {
+                            store.symbolize(symex, exp, pct, sym_heap).into_iter().map(|(sym_expr, pct, mut sym_heap)| {
+                                sym_heap.get_mut(&sym_arr).unwrap().insert(sym_idx.clone(), sym_expr.clone());
+                                (store.clone(), pct.clone(), sym_heap, ret_val.clone())
+                            }).collect()
+                        })
                     }
                 }
             }
@@ -590,6 +511,57 @@ impl SymbolicExecutor {
             }
             _ => vec![(store.clone(), pct.clone(), sym_heap.clone(), ret_val.clone())],
         }
+    }
+
+    // Takes arr expression, idx expression, symbolizes it with the given context, and returns the result of running the given
+    // function
+    fn run_index<F, T>(&mut self, arr: &Expr, idx: &Expr, store: &SymbolicStore, pct: &PathConstraint, sym_heap: &SymbolicHeap, f: F)
+    -> Vec<T>
+    where
+    // TODO: Adjust Vec<T>?
+        // takes symex, sym_arr, sym_idx, pct, sym_heap
+        F: Fn(&mut Self, usize, &Expr, &PathConstraint, &SymbolicHeap) -> Vec<T>,
+    {
+        store.symbolize(self, arr, pct, sym_heap).into_iter().flat_map(|(sym_arr, pct, sym_heap)| {
+            // 1. sym_arr must be heap_ptr.
+            let sym_arr = sym_arr.into_heap_ptr().unwrap();
+            store.symbolize(self, idx, &pct, &sym_heap).into_iter().flat_map(|(sym_idx, pct, sym_heap)| {
+                // 2. sym_idx must be an Expr.
+                let sym_idx = sym_idx.into_expr().unwrap();
+                // TODO: additionally assume out of bounds, see if that's satisfiable, if so throw warning
+
+                // Case distinction on whether sym_idx is constant or not, saves Z3 invocations
+                // TODO: check out of bounds?
+                // TODO: what if heap already contains e.g. x and in pct we have x = 0,
+                // then we would have duplicate elements in the heap if we insert with the constant index 0
+                // hence we must first check if the heap contains the constant index, otherwise we just do the same thing
+                // need to fix this.
+
+                // TODO: new - currently sym_idx constant matching doesnt make much sense together with f
+                // Or does it? I think it's okay.
+                match &sym_idx {
+                    sym_idx@Expr::IntLit(_) => {
+                        return f(self, sym_arr, &sym_idx, &pct, &sym_heap)
+                    }
+                    _ => {}
+                }
+
+                let arr_map = sym_heap.get(&sym_arr).unwrap();
+                arr_map.keys().flat_map(|idx_exp| {
+                    let pct_with_idx_assmpt = Expr::BinOp(
+                        WL::no_loc(BinOpcode::And),
+                        Box::new(WL::no_loc(pct.clone())),
+                        Box::new(WL::no_loc(Expr::BinOp(
+                            WL::no_loc(BinOpcode::Eq),
+                            Box::new(WL::no_loc(sym_idx.clone())),
+                            Box::new(WL::no_loc(idx_exp.clone()))
+                        )))
+                    );
+
+                    f(self, sym_arr, idx_exp, &pct_with_idx_assmpt, &sym_heap)
+                }).collect::<Vec<_>>()
+            }).collect::<Vec<_>>()
+        }).collect()
     }
 }
 
