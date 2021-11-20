@@ -555,6 +555,7 @@ impl SymbolicExecutor {
 
                 let satres = satisfiable(&pct);
                 if let SatResult::Sat(mut model) = satres {
+                    // println!("sat: {:?}, {:?}", &model.0, &model.1);
                     self.testcases.entry(stmt.loc).or_insert(Vec::new()).push(model);
                 }
                 vec![(store.clone(), pct.clone(), sym_heap.clone(), ret_val.clone())]
@@ -695,7 +696,7 @@ impl SymbolicExecutor {
                         SymbolicArray::DefaultArray { length, default, values } => {
                             // Need to do the following three things:
                             // 1. check if idx is equal to all exprs in values.keys()
-                            // 2. assume idx is not equal to any of those AND length is greater than count of values.keys()
+                            // 2. assume idx is not equal to any of those AND length is greater than count of values.keys() AND idx is in bounds
                             // TODO 3. assume idx is out of bounds and throw warning
 
                             let mut paths1 = values.keys().flat_map(|idx_exp| {
@@ -736,10 +737,29 @@ impl SymbolicExecutor {
                                 Box::new(WL::no_loc(length.clone()))
                             );
 
+                            // sym_idx < length && sym_idx >= 0
+                            let paths2_pct_in_bounds = Expr::BinOp(
+                                WL::no_loc(BinOpcode::And),
+                                Box::new(WL::no_loc(Expr::BinOp(
+                                    WL::no_loc(BinOpcode::Lt),
+                                    Box::new(WL::no_loc(sym_idx.clone())),
+                                    Box::new(WL::no_loc(length.clone()))
+                                ))),
+                                Box::new(WL::no_loc(Expr::BinOp(
+                                    WL::no_loc(BinOpcode::Ge),
+                                    Box::new(WL::no_loc(sym_idx.clone())),
+                                    Box::new(WL::no_loc(Expr::IntLit(0)))
+                                )))
+                            );
+
                             let paths2_pct = Expr::BinOp(
                                 WL::no_loc(BinOpcode::And),
                                 Box::new(WL::no_loc(paths2_pct_disjointness)),
-                                Box::new(WL::no_loc(paths2_pct_length))
+                                Box::new(WL::no_loc(Expr::BinOp(
+                                    WL::no_loc(BinOpcode::And),
+                                    Box::new(WL::no_loc(paths2_pct_length)),
+                                    Box::new(WL::no_loc(paths2_pct_in_bounds))
+                                )))
                             );
 
                             let paths2 = f(self, sym_arr, &sym_idx, &paths2_pct, &sym_heap, &data);

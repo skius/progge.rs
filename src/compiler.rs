@@ -303,6 +303,7 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
 
                 self.builder.position_at_end(after_bb);
             },
+            Stmt::Testcase() => {}
             s => panic!("Unsupported statement: {:?}", s)
         }
     }

@@ -1,6 +1,6 @@
 fn analyze(x: int, y: int) {
     let arr = [-1; 3];
-    arr[0] = non_det_42(y, arr);
+    arr[x] = non_det_42(y, arr);
     let i = 0;
     while i < 3 {
         if arr[i] == 42 {
