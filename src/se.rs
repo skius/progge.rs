@@ -57,7 +57,81 @@ impl Display for SymbolicValue {
 }
 
 #[derive(Clone, Debug)]
-pub struct SymbolicHeap(pub HashMap<usize, HashMap<Expr, SymbolicValue>>);
+pub enum SymbolicArray {
+    ExplicitArray(Vec<SymbolicValue>),
+    DefaultArray {
+        length: Expr,
+        default: SymbolicValue,
+        values: HashMap<Expr, SymbolicValue>,
+    }
+}
+
+impl SymbolicArray {
+    fn insert(&mut self, idx: &Expr, new_val: SymbolicValue) {
+        match self {
+            SymbolicArray::ExplicitArray(arr) => {
+                if let Expr::IntLit(idx) = idx {
+                    arr[*idx as usize] = new_val;
+                } else {
+                    panic!("ExplicitArray must always be indexed with IntLit")
+                }
+            }
+            SymbolicArray::DefaultArray { length, default, values } => {
+                values.insert(idx.clone(), new_val);
+            }
+        }
+    }
+
+    fn get(&self, idx: &Expr) -> &SymbolicValue {
+        match self {
+            SymbolicArray::ExplicitArray(els) => {
+                if let Expr::IntLit(idx) = idx {
+                    els.get(*idx as usize).unwrap()
+                } else {
+                    panic!("ExplicitArray must always be indexed with IntLit")
+                }
+            }
+            SymbolicArray::DefaultArray { values, default, .. } => {
+                values.get(idx).unwrap_or(default)
+            }
+        }
+    }
+}
+
+impl Display for SymbolicArray {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            SymbolicArray::ExplicitArray(els) => {
+                write!(f, "[")?;
+                for (i, el) in els.iter().enumerate() {
+                    write!(f, "{}", el)?;
+                    if i < els.len() - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "]")
+            }
+            SymbolicArray::DefaultArray { default, length, values } => {
+                write!(f, "[{}; {}]", default, length);
+                write!(f, "{{")?;
+                let mut first = true;
+                for (k, v) in values.iter() {
+                    if first {
+                        first = false;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{} -> {}", k, v)?;
+                }
+                write!(f, "}}")
+            }
+        }
+    }
+}
+
+// SymbolicHeap is array_uid -> (length, (index -> symbolic_value))
+#[derive(Clone, Debug)]
+pub struct SymbolicHeap(pub HashMap<usize, SymbolicArray>);
 
 impl SymbolicHeap {
     pub fn new_ptr(&self) -> usize {
@@ -69,37 +143,21 @@ impl Display for SymbolicHeap {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{{")?;
         let mut first = true;
-        for (k, v) in self.0.iter() {
+        for (k, sym_arr) in self.0.iter() {
             if first {
                 first = false;
             } else {
                 write!(f, ", ")?;
             }
-            write!(f, "{}: ", k,)?;
-            display_symbolic_arr(v, f)?;
+            write!(f, "{}: {}", k, sym_arr)?;
         }
         write!(f, "}}")?;
         Ok(())
     }
 }
 
-fn display_symbolic_arr(arr: &HashMap<Expr, SymbolicValue>, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-    write!(f, "{{")?;
-    let mut first = true;
-    for (k, v) in arr.iter() {
-        if first {
-            first = false;
-        } else {
-            write!(f, ", ")?;
-        }
-        write!(f, "{} -> {}", k, v)?;
-    }
-    write!(f, "}}")?;
-    Ok(())
-}
-
 impl Deref for SymbolicHeap {
-    type Target = HashMap<usize, HashMap<Expr, SymbolicValue>>;
+    type Target = HashMap<usize, SymbolicArray>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -203,19 +261,47 @@ impl SymbolicStore {
 
                     let ptr = sym_heap.new_ptr();
 
-                    for (i, sym_arg) in sym_args.into_iter().enumerate() {
-                        sym_heap.entry(ptr).or_insert(HashMap::new()).insert(Expr::IntLit(i as i64), sym_arg);
-                    }
+                    sym_heap.insert(ptr, SymbolicArray::ExplicitArray(sym_args));
+
+                    // for (i, sym_arg) in sym_args.into_iter().enumerate() {
+                    //     sym_heap.entry(ptr).or_insert(HashMap::new()).insert(Expr::IntLit(i as i64), sym_arg);
+                    // }
 
                     (SymbolicValue::HeapPtr(ptr), pct, sym_heap)
                 }).collect()
             }
             // TODO: Default array. needs a different representation in SymbolicHeap I assume.
-            // Expr::DefaultArray { .. } => {}
+            Expr::DefaultArray { default_value, size } => {
+                self.symbolize(symex, default_value, pct, sym_heap).into_iter().flat_map(|(sym_default, pct, sym_heap)| {
+                    self.symbolize(symex, size, &pct, &sym_heap).into_iter().map(|(sym_size, pct, mut sym_heap)| {
+                        let ptr = sym_heap.new_ptr();
+                        // Must be Expr, typechecking would've caught this otherwise.
+                        let sym_size = sym_size.into_expr().unwrap();
+
+                        sym_heap.insert(ptr, SymbolicArray::DefaultArray {
+                            default: sym_default.clone(),
+                            length: sym_size,
+                            values: HashMap::new(),
+                        });
+
+                        (SymbolicValue::HeapPtr(ptr), pct, sym_heap)
+                    }).collect::<Vec<_>>()
+                }).collect()
+            }
             Expr::Index(arr, idx) => {
-                symex.run_index(arr, idx, self, pct, sym_heap, |symex, sym_arr, sym_idx, pct, sym_heap| {
-                    vec![(sym_heap[&sym_arr][&sym_idx].clone(), pct.clone(), sym_heap.clone())]
-                })
+                symex.run_index(
+                    arr,
+                    idx,
+                    self,
+                    pct,
+                    sym_heap,
+                    |symex, sym_heap, pct| {
+                        vec![(sym_heap, pct, ())]
+                    },
+                    |symex, sym_arr, sym_idx, pct, sym_heap, _| {
+                        vec![(sym_heap[&sym_arr].get(&sym_idx).clone(), pct.clone(), sym_heap.clone())]
+                    },
+                )
             }
             exp => vec![(SymbolicValue::Expr(exp.clone()), pct.clone(), sym_heap.clone())],
         }
@@ -296,15 +382,16 @@ pub fn run_symbolic_execution(prog: Program) -> SymbolicExecutor {
     // }
     // println!();
 
+    cache::CACHE.with(|c| {
+        // println!("Cache contained: {:?}", c.borrow().keys().collect::<Vec<_>>());
+        println!("Cache contained {:?} entries", c.borrow().keys().len());
+    });
+
     Z3_TIME.with(|t| {
        println!("Took Z3: {}ms, {}s", *t.borrow(), (*t.borrow())/1000);
     });
     Z3_INVOCATIONS.with(|t| {
         println!("Called Z3 {} times", *t.borrow());
-    });
-
-    cache::CACHE.with(|c| {
-        println!("Cache contained: {:?}", c.borrow().keys().collect::<Vec<_>>());
     });
 
 
@@ -370,22 +457,23 @@ impl SymbolicExecutor {
 
         // Then check if PCT is sat.
         // very inefficient to invoke Z3 for every block
-        // if satisfiable(pct).is_unsat() {
-        //     // println!("PCT {} is not satisfiable", pct);
-        //     return vec![];
-        // }
+        // update- no, not really, in fact it's essentially to necessary in the context of loop unrolling and dynamically sized arrays
+        if satisfiable(pct).is_unsat() {
+            // println!("PCT {} is not satisfiable", pct);
+            return vec![];
+        }
 
 
         block.0.iter().fold(
             vec![(store.clone(), pct.clone(), sym_heap.clone(), ret_val.clone())],
             |paths, stmt| {
-                paths.iter().map(|(store, pct, sym_heap, retval)| {
-                    if retval.is_some() {
+                paths.into_iter().map(|(store, pct, sym_heap, ret_val)| {
+                    if ret_val.is_some() {
                         // Already returned, so we short-circuit
                         // println!("already returned before execing {} : {}", stmt.clone(), retval.clone().unwrap());
-                        return vec![(store.clone(), pct.clone(), sym_heap.clone(), retval.clone())];
+                        return vec![(store.clone(), pct.clone(), sym_heap.clone(), ret_val.clone())];
                     }
-                    self.run_stmt(stmt, store, pct, sym_heap, retval)
+                    self.run_stmt(stmt, &store, &pct, &sym_heap, &ret_val)
                 }).flatten().collect::<Vec<_>>()
             }
         )
@@ -420,12 +508,23 @@ impl SymbolicExecutor {
                         }).collect()
                     }
                     LocExpr::Index(arr, idx) => {
-                        self.run_index(arr, idx, store, pct, sym_heap, |symex, sym_arr, sym_idx, pct, sym_heap| {
-                            store.symbolize(symex, exp, pct, sym_heap).into_iter().map(|(sym_expr, pct, mut sym_heap)| {
-                                sym_heap.get_mut(&sym_arr).unwrap().insert(sym_idx.clone(), sym_expr.clone());
-                                (store.clone(), pct.clone(), sym_heap, ret_val.clone())
-                            }).collect()
-                        })
+                        self.run_index(
+                            arr,
+                            idx,
+                            store,
+                            pct,
+                            sym_heap,
+                            |symex, pct, sym_heap| {
+                                store.symbolize(symex, exp, &pct, &sym_heap).into_iter().map(|(sym_exp, pct, sym_heap)| {
+                                    (pct, sym_heap, sym_exp)
+                                }).collect()
+                            },
+                            |symex, sym_arr, sym_idx, pct, sym_heap, sym_exp| {
+                                let mut new_sym_heap = sym_heap.clone();
+                                new_sym_heap.get_mut(&sym_arr).unwrap().insert(sym_idx, sym_exp.clone());
+                                vec![(store.clone(), pct.clone(), new_sym_heap, ret_val.clone())]
+                            },
+                        )
                     }
                 }
             }
@@ -452,6 +551,8 @@ impl SymbolicExecutor {
                 })
             }
             Stmt::Testcase() => {
+                // println!("\ntestcase line{}, \npct: {}\nsym_heap: {}", stmt.loc.line, &pct, &sym_heap);
+
                 let satres = satisfiable(&pct);
                 if let SatResult::Sat(mut model) = satres {
                     self.testcases.entry(stmt.loc).or_insert(Vec::new()).push(model);
@@ -507,12 +608,20 @@ impl SymbolicExecutor {
 
     // Takes arr expression, idx expression, symbolizes it with the given context, and returns the result of running the given
     // function
-    fn run_index<F, T>(&mut self, arr: &Expr, idx: &Expr, store: &SymbolicStore, pct: &PathConstraint, sym_heap: &SymbolicHeap, f: F)
-    -> Vec<T>
-    where
-    // TODO: Adjust Vec<T>?
-        // takes symex, sym_arr, sym_idx, pct, sym_heap
-        F: Fn(&mut Self, usize, &Expr, &PathConstraint, &SymbolicHeap) -> Vec<T>,
+
+    /*
+    Quick reason why the "prior_fn" parameter is necessary:
+
+
+     */
+    fn run_index<F, T, G, U>(&mut self, arr: &Expr, idx: &Expr, store: &SymbolicStore, pct: &PathConstraint, sym_heap: &SymbolicHeap, prior_fn: G, f: F)
+        -> Vec<T>
+        where
+            // TODO: Adjust Vec<T>? maybe IntoIter?
+            // takes symex, sym_arr, sym_idx, pct, sym_heap
+            F: Fn(&mut Self, usize, &Expr, &PathConstraint, &SymbolicHeap, &U) -> Vec<T>,
+            // takes symex, pct, sym_heap and returns something that will be used prior to indexing (i.e. the sym_idx passed to f is from prior_fn's returned SymbolicHeaps
+            G: Fn(&mut Self, PathConstraint, SymbolicHeap) -> Vec<(PathConstraint, SymbolicHeap, U)>,
     {
         store.symbolize(self, arr, pct, sym_heap).into_iter().flat_map(|(sym_arr, pct, sym_heap)| {
             // 1. sym_arr must be heap_ptr.
@@ -520,37 +629,97 @@ impl SymbolicExecutor {
             store.symbolize(self, idx, &pct, &sym_heap).into_iter().flat_map(|(sym_idx, pct, sym_heap)| {
                 // 2. sym_idx must be an Expr.
                 let sym_idx = sym_idx.into_expr().unwrap();
-                // TODO: additionally assume out of bounds, see if that's satisfiable, if so throw warning
 
-                // Case distinction on whether sym_idx is constant or not, saves Z3 invocations
-                // TODO: check out of bounds?
-                // TODO: what if heap already contains e.g. x and in pct we have x = 0,
-                // then we would have duplicate elements in the heap if we insert with the constant index 0
-                // hence we must first check if the heap contains the constant index, otherwise we just do the same thing
-                // need to fix this.
+                prior_fn(self, pct, sym_heap).into_iter().flat_map(|(pct, sym_heap, data)| {
+                    // TODO: additionally assume out of bounds, see if that's satisfiable, if so throw warning
 
-                // TODO: new - currently sym_idx constant matching doesnt make much sense together with f
-                // Or does it? I think it's okay.
-                match &sym_idx {
-                    sym_idx@Expr::IntLit(_) => {
-                        return f(self, sym_arr, &sym_idx, &pct, &sym_heap)
+                    // TODO: check out of bounds?
+                    let arr_map = sym_heap.get(&sym_arr).unwrap();
+                    match arr_map {
+                        SymbolicArray::ExplicitArray(els) => {
+                            match &sym_idx {
+                                // TODO: out of bounds check
+                                sym_idx@Expr::IntLit(_) => {
+                                    return f(self, sym_arr, &sym_idx, &pct, &sym_heap, &data)
+                                }
+                                _ => {}
+                            }
+
+                            els.into_iter().enumerate().flat_map(|(idx, el)| {
+                                // Maybe factor this out into an Index enum that is either constant, for explicit arrays, or an Expr, for default arrays?
+                                let idx_exp = Expr::IntLit(idx as i64);
+
+                                let pct_with_idx_assmpt = Expr::BinOp(
+                                    WL::no_loc(BinOpcode::And),
+                                    Box::new(WL::no_loc(pct.clone())),
+                                    Box::new(WL::no_loc(Expr::BinOp(
+                                        WL::no_loc(BinOpcode::Eq),
+                                        Box::new(WL::no_loc(idx_exp.clone())),
+                                        Box::new(WL::no_loc(sym_idx.clone()))
+                                    )))
+                                );
+                                // TODO: might have an issue with this order - inside f we might (i.e. in an index assign statement)
+                                // change the sym_heap once again, e.g. if the RHS is a Call, and then the actual final heap might have different indices
+                                f(self, sym_arr, &idx_exp, &pct_with_idx_assmpt, &sym_heap, &data)
+                            }).collect::<Vec<_>>()
+                        },
+                        SymbolicArray::DefaultArray { length, default, values } => {
+                            // Need to do the following three things:
+                            // 1. check if idx is equal to all exprs in values.keys()
+                            // 2. assume idx is not equal to any of those AND length is greater than count of values.keys()
+                            // TODO 3. assume idx is out of bounds and throw warning
+
+                            let mut paths1 = values.keys().flat_map(|idx_exp| {
+                                let pct_with_idx_assmpt = Expr::BinOp(
+                                    WL::no_loc(BinOpcode::And),
+                                    Box::new(WL::no_loc(pct.clone())),
+                                    Box::new(WL::no_loc(Expr::BinOp(
+                                        WL::no_loc(BinOpcode::Eq),
+                                        Box::new(WL::no_loc(idx_exp.clone())),
+                                        Box::new(WL::no_loc(sym_idx.clone()))
+                                    )))
+                                );
+
+                                f(self, sym_arr, &idx_exp, &pct_with_idx_assmpt, &sym_heap, &data)
+
+                            }).collect::<Vec<_>>();
+
+                            // All current indices are different from sym_idx
+                            let paths2_pct_disjointness = values.keys().fold(
+                                pct.clone(),
+                                |curr_pct, idx_exp| {
+                                    Expr::BinOp(
+                                        WL::no_loc(BinOpcode::And),
+                                        Box::new(WL::no_loc(curr_pct)),
+                                        Box::new(WL::no_loc(Expr::BinOp(
+                                            WL::no_loc(BinOpcode::Ne),
+                                            Box::new(WL::no_loc(idx_exp.clone())),
+                                            Box::new(WL::no_loc(sym_idx.clone()))
+                                        )))
+                                    )
+                                }
+                            );
+
+                            // There must still be space for more explicitly-indexed elements
+                            let paths2_pct_length = Expr::BinOp(
+                                WL::no_loc(BinOpcode::Lt),
+                                Box::new(WL::no_loc(Expr::IntLit(values.keys().len() as i64))),
+                                Box::new(WL::no_loc(length.clone()))
+                            );
+
+                            let paths2_pct = Expr::BinOp(
+                                WL::no_loc(BinOpcode::And),
+                                Box::new(WL::no_loc(paths2_pct_disjointness)),
+                                Box::new(WL::no_loc(paths2_pct_length))
+                            );
+
+                            let paths2 = f(self, sym_arr, &sym_idx, &paths2_pct, &sym_heap, &data);
+
+                            paths1.extend(paths2);
+
+                            paths1
+                        },
                     }
-                    _ => {}
-                }
-
-                let arr_map = sym_heap.get(&sym_arr).unwrap();
-                arr_map.keys().flat_map(|idx_exp| {
-                    let pct_with_idx_assmpt = Expr::BinOp(
-                        WL::no_loc(BinOpcode::And),
-                        Box::new(WL::no_loc(pct.clone())),
-                        Box::new(WL::no_loc(Expr::BinOp(
-                            WL::no_loc(BinOpcode::Eq),
-                            Box::new(WL::no_loc(sym_idx.clone())),
-                            Box::new(WL::no_loc(idx_exp.clone()))
-                        )))
-                    );
-
-                    f(self, sym_arr, idx_exp, &pct_with_idx_assmpt, &sym_heap)
                 }).collect::<Vec<_>>()
             }).collect::<Vec<_>>()
         }).collect()
@@ -650,12 +819,12 @@ pub fn satisfiable(pct: &Expr) -> SatResult {
     // let bests = get_bests(vec![&pct_egg]);
     // println!("pct best sexp: {}", bests[0].to_string());
 
-    // Uncomment if you want caching (slower atm)
-    // if let Some(model) = cache::satisfiable(pct) {
-    //     println!("Cache hit! PCT: {}, model {:?}", pct, &model);
-    //     cache::insert(pct, model.clone());
-    //     return SatResult::Sat(model);
-    // }
+    // Uncomment if you want caching (slower atm) -- update(20-11): seems faster?
+    if let Some(model) = cache::satisfiable(pct) {
+        // println!("Cache hit! PCT: {}, model {:?}", pct, &model);
+        cache::insert(pct, model.clone());
+        return SatResult::Sat(model);
+    }
 
     let start = SystemTime::now();
 
@@ -675,7 +844,7 @@ pub fn satisfiable(pct: &Expr) -> SatResult {
             // }
             let model = map_of_model(&ctx, solver.get_model().unwrap(), &pct.free_vars());
             // Uncomment if you want caching (slower atm)
-            // cache::insert(pct, model.clone());
+            cache::insert(pct, model.clone());
             SatResult::Sat(model)
         },
         z3::SatResult::Unsat => SatResult::Unsat,
