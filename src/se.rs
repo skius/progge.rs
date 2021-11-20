@@ -369,18 +369,18 @@ pub fn run_symbolic_execution(prog: Program) -> SymbolicExecutor {
     // println!("Starting symbolic execution with state ({}, {}) ", &store, &pct);
     let paths = symex.run_block(&func_start.body, &store, &pct, &sym_heap, &None);
 
-    // for (sym_store, pct, sym_heap, ret_val) in paths {
-    //     if !satisfiable(&pct).is_sat() {
-    //         continue;
-    //     }
-    //
-    //     println!("\nResulting path:");
-    //     println!("store: {}", sym_store);
-    //     println!("pct: {}", pct);
-    //     println!("heap: {}", sym_heap);
-    //     println!("ret: {:?}", ret_val);
-    // }
-    // println!();
+    for (sym_store, pct, sym_heap, ret_val) in paths {
+        if !satisfiable(&pct).is_sat() {
+            continue;
+        }
+
+        println!("\nResulting path:");
+        println!("store: {}", sym_store);
+        println!("pct: {}", pct);
+        println!("heap: {}", sym_heap);
+        println!("ret: {:?}", ret_val);
+    }
+    println!();
 
     cache::CACHE.with(|c| {
         // println!("Cache contained: {:?}", c.borrow().keys().collect::<Vec<_>>());
@@ -612,7 +612,35 @@ impl SymbolicExecutor {
     /*
     Quick reason why the "prior_fn" parameter is necessary:
 
+    fn analyze(x: int, y: int) {
+        let arr = [-1; 3];
+        arr[0] = non_det_42(y, arr);
+        let i = 0;
+        while i < 3 {
+            if arr[i] == 42 {
+                testcase!;
+            }
+            i = i + 1;
+        }
+        return;
+    }
 
+    fn non_det_42(idx: int, arr: [int]) -> int {
+        arr[idx] = 42;
+        return 69;
+    }
+
+    if we did not have prior_fn, then the store from non_det_42 would essentially get lost in the assignment statement,
+    and we end with the following testcases:
+    { x = 0, y = 0 } **
+    { x = 0, y = 1 }
+    { x = 0, y = 2 }
+
+    however the ** marked one is not correct - if y is 0 then arr[0] = arr[y] will be overwritten and arr[i] can never be 42.
+
+    For this reason, when calculating the indices that we pass to `f` we must work with the symbolic heap returned by the last evaluated expression,
+    which in this case is the RHS of an index-assignment statement. This is what prior_fn is for, it allows us to specify other functionality to be run before
+    calculating indices, i.e. evaluating the RHS.
      */
     fn run_index<F, T, G, U>(&mut self, arr: &Expr, idx: &Expr, store: &SymbolicStore, pct: &PathConstraint, sym_heap: &SymbolicHeap, prior_fn: G, f: F)
         -> Vec<T>
@@ -630,23 +658,25 @@ impl SymbolicExecutor {
                 // 2. sym_idx must be an Expr.
                 let sym_idx = sym_idx.into_expr().unwrap();
 
-                prior_fn(self, pct, sym_heap).into_iter().flat_map(|(pct, sym_heap, data)| {
-                    // TODO: additionally assume out of bounds, see if that's satisfiable, if so throw warning
+                // TODO: additionally assume out of bounds, see if that's satisfiable, if so throw warning
 
-                    // TODO: check out of bounds?
-                    let arr_map = sym_heap.get(&sym_arr).unwrap();
-                    match arr_map {
-                        SymbolicArray::ExplicitArray(els) => {
-                            match &sym_idx {
-                                // TODO: out of bounds check
-                                sym_idx@Expr::IntLit(_) => {
-                                    return f(self, sym_arr, &sym_idx, &pct, &sym_heap, &data)
-                                }
-                                _ => {}
+                // TODO: check out of bounds?
+                let arr_map = sym_heap.get(&sym_arr).unwrap();
+                match arr_map {
+                    SymbolicArray::ExplicitArray(els) => {
+                        match &sym_idx {
+                            // TODO: out of bounds check
+                            sym_idx@Expr::IntLit(_) => {
+                                return prior_fn(self, pct, sym_heap).into_iter().flat_map(|(pct, sym_heap, data)| {
+                                    f(self, sym_arr, &sym_idx, &pct, &sym_heap, &data)
+                                }).collect::<Vec<_>>();
                             }
+                            _ => {}
+                        }
 
-                            els.into_iter().enumerate().flat_map(|(idx, el)| {
-                                // Maybe factor this out into an Index enum that is either constant, for explicit arrays, or an Expr, for default arrays?
+                        els.into_iter().enumerate().flat_map(|(idx, el)| {
+                            // Maybe factor this out into an Index enum that is either constant, for explicit arrays, or an Expr, for default arrays?
+                            prior_fn(self, pct.clone(), sym_heap.clone()).into_iter().flat_map(|(pct, sym_heap, data)| {
                                 let idx_exp = Expr::IntLit(idx as i64);
 
                                 let pct_with_idx_assmpt = Expr::BinOp(
@@ -662,65 +692,69 @@ impl SymbolicExecutor {
                                 // change the sym_heap once again, e.g. if the RHS is a Call, and then the actual final heap might have different indices
                                 f(self, sym_arr, &idx_exp, &pct_with_idx_assmpt, &sym_heap, &data)
                             }).collect::<Vec<_>>()
-                        },
-                        SymbolicArray::DefaultArray { length, default, values } => {
-                            // Need to do the following three things:
-                            // 1. check if idx is equal to all exprs in values.keys()
-                            // 2. assume idx is not equal to any of those AND length is greater than count of values.keys()
-                            // TODO 3. assume idx is out of bounds and throw warning
+                        }).collect::<Vec<_>>()
+                    },
+                    SymbolicArray::DefaultArray { length, default, values } => {
+                        // Need to do the following three things:
+                        // 1. check if idx is equal to all exprs in values.keys()
+                        // 2. assume idx is not equal to any of those AND length is greater than count of values.keys()
+                        // TODO 3. assume idx is out of bounds and throw warning
 
-                            let mut paths1 = values.keys().flat_map(|idx_exp| {
-                                let pct_with_idx_assmpt = Expr::BinOp(
+                        let mut paths1 = values.keys().flat_map(|idx_exp| {
+                            let pct_with_idx_assmpt = Expr::BinOp(
+                                WL::no_loc(BinOpcode::And),
+                                Box::new(WL::no_loc(pct.clone())),
+                                Box::new(WL::no_loc(Expr::BinOp(
+                                    WL::no_loc(BinOpcode::Eq),
+                                    Box::new(WL::no_loc(idx_exp.clone())),
+                                    Box::new(WL::no_loc(sym_idx.clone()))
+                                )))
+                            );
+
+                            prior_fn(self, pct.clone(), sym_heap.clone()).into_iter().flat_map(|(pct, sym_heap, data)| {
+                                f(self, sym_arr, &idx_exp, &pct_with_idx_assmpt, &sym_heap, &data)
+                            }).collect::<Vec<_>>()
+                        }).collect::<Vec<_>>();
+
+                        // All current indices are different from sym_idx
+                        let paths2_pct_disjointness = values.keys().fold(
+                            pct.clone(),
+                            |curr_pct, idx_exp| {
+                                Expr::BinOp(
                                     WL::no_loc(BinOpcode::And),
-                                    Box::new(WL::no_loc(pct.clone())),
+                                    Box::new(WL::no_loc(curr_pct)),
                                     Box::new(WL::no_loc(Expr::BinOp(
-                                        WL::no_loc(BinOpcode::Eq),
+                                        WL::no_loc(BinOpcode::Ne),
                                         Box::new(WL::no_loc(idx_exp.clone())),
                                         Box::new(WL::no_loc(sym_idx.clone()))
                                     )))
-                                );
+                                )
+                            }
+                        );
 
-                                f(self, sym_arr, &idx_exp, &pct_with_idx_assmpt, &sym_heap, &data)
+                        // There must still be space for more explicitly-indexed elements
+                        let paths2_pct_length = Expr::BinOp(
+                            WL::no_loc(BinOpcode::Lt),
+                            Box::new(WL::no_loc(Expr::IntLit(values.keys().len() as i64))),
+                            Box::new(WL::no_loc(length.clone()))
+                        );
 
-                            }).collect::<Vec<_>>();
+                        let paths2_pct = Expr::BinOp(
+                            WL::no_loc(BinOpcode::And),
+                            Box::new(WL::no_loc(paths2_pct_disjointness)),
+                            Box::new(WL::no_loc(paths2_pct_length))
+                        );
 
-                            // All current indices are different from sym_idx
-                            let paths2_pct_disjointness = values.keys().fold(
-                                pct.clone(),
-                                |curr_pct, idx_exp| {
-                                    Expr::BinOp(
-                                        WL::no_loc(BinOpcode::And),
-                                        Box::new(WL::no_loc(curr_pct)),
-                                        Box::new(WL::no_loc(Expr::BinOp(
-                                            WL::no_loc(BinOpcode::Ne),
-                                            Box::new(WL::no_loc(idx_exp.clone())),
-                                            Box::new(WL::no_loc(sym_idx.clone()))
-                                        )))
-                                    )
-                                }
-                            );
 
-                            // There must still be space for more explicitly-indexed elements
-                            let paths2_pct_length = Expr::BinOp(
-                                WL::no_loc(BinOpcode::Lt),
-                                Box::new(WL::no_loc(Expr::IntLit(values.keys().len() as i64))),
-                                Box::new(WL::no_loc(length.clone()))
-                            );
+                        let paths2 = prior_fn(self, pct.clone(), sym_heap.clone()).into_iter().flat_map(|(pct, sym_heap, data)| {
+                            f(self, sym_arr, &sym_idx, &paths2_pct, &sym_heap, &data)
+                        }).collect::<Vec<_>>();
+                        paths1.extend(paths2);
 
-                            let paths2_pct = Expr::BinOp(
-                                WL::no_loc(BinOpcode::And),
-                                Box::new(WL::no_loc(paths2_pct_disjointness)),
-                                Box::new(WL::no_loc(paths2_pct_length))
-                            );
-
-                            let paths2 = f(self, sym_arr, &sym_idx, &paths2_pct, &sym_heap, &data);
-
-                            paths1.extend(paths2);
-
-                            paths1
-                        },
-                    }
-                }).collect::<Vec<_>>()
+                        paths1
+                    },
+                }
+                // }).collect::<Vec<_>>()
             }).collect::<Vec<_>>()
         }).collect()
     }
