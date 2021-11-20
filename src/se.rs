@@ -608,11 +608,40 @@ impl SymbolicExecutor {
 
     // Takes arr expression, idx expression, symbolizes it with the given context, and returns the result of running the given
     // function
-
     /*
     Quick reason why the "prior_fn" parameter is necessary:
 
+    fn analyze(x: int, y: int) {
+        let arr = [-1; 3];
+        arr[0] = non_det_42(y, arr);
+        let i = 0;
+        while i < 3 {
+            if arr[i] == 42 {
+                testcase!;
+            }
+            i = i + 1;
+        }
+        return;
+    }
 
+    fn non_det_42(idx: int, arr: [int]) -> int {
+        arr[idx] = 42;
+        return 69;
+    }
+
+    if we did not have prior_fn, then the store from non_det_42 would essentially get lost in the assignment statement,
+    and we end with the following testcases:
+    { x = 0, y = 0 } **
+    { x = 0, y = 1 }
+    { x = 0, y = 2 }
+
+    however the ** marked one is not correct - if y is 0 then arr[0] = arr[y] will be overwritten and arr[i] can never be 42.
+
+    For this reason, when calculating the indices that we pass to `f` we must work with the symbolic heap returned by the last evaluated expression,
+    which in this case is the RHS of an index-assignment statement. This is what prior_fn is for, it allows us to specify other functionality to be run before
+    calculating indices, i.e. evaluating the RHS.
+
+    See the tag "symex-buggy-run-index" to see this for yourself.
      */
     fn run_index<F, T, G, U>(&mut self, arr: &Expr, idx: &Expr, store: &SymbolicStore, pct: &PathConstraint, sym_heap: &SymbolicHeap, prior_fn: G, f: F)
         -> Vec<T>
