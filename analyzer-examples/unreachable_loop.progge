@@ -9,6 +9,7 @@ fn analyze(x: int) {
     }
 
     if x_prev < x + 5 {
+        // Clearly reachable
         unreachable!;
     }
 

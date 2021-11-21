@@ -5,6 +5,9 @@ fn analyze(x: int, y: int) {
         // unreachable by congruence
         testcase!;
     }
+    if first_arg > second_arg {
+        testcase!;
+    }
     return;
 }
 
