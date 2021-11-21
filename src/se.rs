@@ -541,14 +541,15 @@ impl SymbolicExecutor {
             }
             Stmt::While { .. } => panic!("While should have been removed in loop bounding"),
             Stmt::Call(name, args) if name.as_str() == "assume!" => {
-                // TODO: Will need to handle Stmt::Call in the future when arrays are supported.
-                // TODO: that's now. Do it.
-                let new_pct = Expr::BinOp(
-                    WL::no_loc(BinOpcode::And),
-                    Box::new(WL::no_loc(pct.clone())),
-                    Box::new(args[0].clone()),
-                );
-                return vec![(store.clone(), new_pct, sym_heap.clone(), ret_val.clone())];
+                // assume! has one arg
+                store.symbolize(self, &args[0], pct, sym_heap).into_iter().map(|(sym_arg, pct, sym_heap)| {
+                    let new_pct = Expr::BinOp(
+                        WL::no_loc(BinOpcode::And),
+                        Box::new(WL::no_loc(pct)),
+                        Box::new(WL::no_loc(sym_arg.into_expr().unwrap())),
+                    );
+                    (store.clone(), new_pct, sym_heap, ret_val.clone())
+                }).collect()
             }
             Stmt::Call(name, args) => {
                 // Built-ins' only side-effects are that they might change the symbolic heap.
