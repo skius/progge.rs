@@ -1,0 +1,23 @@
+fn analyze(x: int) {
+    let i = 0;
+    let n = 3;
+    let x_prev = x;
+    while i < n {
+        x = x + i;
+        i = i + 1;
+        testcase!;
+    /*  ^^^^^^^^^ reported testcases:
+        { x = 0 }
+    */
+    }
+
+    if x_prev < x + 5 {
+        // Clearly reachable
+        unreachable!;
+    /*  ^^^^^^^^^^^^ reported testcase:
+        { x = 0 }
+    */
+    }
+
+    return;
+}

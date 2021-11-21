@@ -1,10 +1,29 @@
-fn analyze(x: int, y: int) {
+fn analyze(x: int, y: int, z: bool) {
+    if z {
+        return;
+    }
     let i = 0;
     if x < y || x > y {
         i = 1;
     }
     if i == 0 {
+        // is reachable
         unreachable!;
+    /*  ^^^^^^^^^^^^ reported testcase:
+        { x = 0, y = 0, z = false }
+    */
+    }
+
+    let j = 0;
+    if x < y {
+        j = 1;
+    } else {
+        j = 1;
+    }
+
+    if j == 0 {
+        unreachable!;
+    /*  ^^^^^^^^^^^^ proven by AI to be unreachable */
     }
 
     return;

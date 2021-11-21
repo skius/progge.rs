@@ -1,23 +1,30 @@
 fn analyze(x: int) {
     let i = 0;
     while i < x {
-        // only constants in intervals, hence [0, +oo]
-        // but from state { -i_1 + x_1 - 1 >= 0; i_1 >= 0 }
-        // one can see that `i <= x-1` holds
+        // only constants allowed in intervals, hence [0, +oo]
+        // but from state one can see that `i <= x-1` holds
         analyze!(i);
+    /*           ^
+        values: [0, +oo]
+        state:  { -i_1 + x_1 - 1 >= 0; i_1 >= 0 }
+    */
 
         if i > x {
             // could be any expression
             // unreachable
             analyze!(i + 100);
+        /*  ^^^^^^^^^^^^^^^^^ AI proves unreachability */
         }
 
         i = i + 1;
     }
 
     if x >= 0 && x <= 10 {
-        // [0, 10]
         analyze!(x);
+    /*           ^
+        values: [0, 10]
+        state:  { -x_1 + 10 >= 0; i_1 - x_1 >= 0; x_1 >= 0 }
+    */
         let i = 0;
         let some_condition = true;
         // proggers isn't precise in these cases yet
@@ -26,12 +33,19 @@ fn analyze(x: int) {
         } else {
             i = 5;
         }
-        // [-10, 50]
         analyze!(i * x);
+    /*           ^^^^^
+        values: [-10, 50]
+        state:  { -i_2 + 5 >= 0; i_2 + 1 >= 0; -x_1 + 10 >= 0; i_1 - x_1 >= 0; x_1 >= 0 }
+    */
     }
 
     // not able to deduce x*x >= 0
     analyze!(x * x);
+/*           ^^^^^
+    values: [-oo, +oo]
+    state:  { i_1 - x_1 >= 0; i_1 >= 0 }
+*/
 
     return;
 }

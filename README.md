@@ -4,18 +4,20 @@ Proggers is a program analysis playground for a simple, imperative language.
 
 ## Features
 
-- Numerical analysis using abstract interpretation
-- Type-checking
-- Compilation to native code
+- [Numerical analysis using abstract interpretation](#Numerical-Analysis-using-Abstract-Interpretation)
+- [Symbolic execution](#Symbolic-Execution)
+- [Type-checking](#Type-Checking)
+- [Compilation to native code](#Compilation)
 - Data-flow analyses (planned)
-- Symbolic execution (planned)
 
 ### Installation
 
-This program needs ELINA to work. See [elina-rs](https://github.com/skius/elina-rs) for more information and installation instructions.
-Also, LLVM version 13 is required. [Their website](https://apt.llvm.org/) may be of interest. 
+Dependencies:
+- ELINA - See [skius/elina-rs](https://github.com/skius/elina-rs) for more information and installation instructions.
+- LLVM version 13 - [Their website](https://apt.llvm.org/) may be of interest.
+- Z3 - See [Z3Prover/z3](https://github.com/Z3Prover/z3) and [prove-rs/z3.rs](https://github.com/prove-rs/z3.rs).
 
-*Neither ELINA nor LLVM are required for type-checking and CFG visualization, hence they could be turned
+*Neither ELINA nor LLVM nor Z3 are required for type-checking and CFG visualization, hence they could be turned
 into a crate feature. Please, feel free to contribute!*
 
 Once the prerequisites are installed, you can install Proggers with: `cargo install --git https://github.com/skius/progge.rs`
@@ -26,7 +28,9 @@ proggers
   <sourcefile>        # the sourcefile to analyze
   --cfg               # visualize the control flow graph
   --typecheck         # type-check the source
-  --analyze           # run the abstract interpreter over the source
+  --analyze           # shorthand for --symex --ai
+  --symex             # run symbolic execution
+  --ai                # run abstract interpretation
   --ast               # print the abstract syntax tree
   -o <outputfile>     # compile source into the executable <outputfile>
   --verbose           # print LLVM IR when compiling
@@ -45,6 +49,9 @@ block:      stmt;*
 stmt:       let var = expr
             | var = expr
             | expr[expr] = expr
+            | var(expr,*)
+            | testcase!
+            | unreachable!
             | if expr { block } [ else { block } ]
             | while expr { block }
             | return [expr]
@@ -60,16 +67,28 @@ binop:      + | - | * | / | % | < | <= | > | >= | == | !=
 unop:       - | !
 var:        [A-Za-z_][A-Za-z0-9_]*
 type:       int | bool | [type]
-
 ```
 
 ### Semantics
 Nothing special. The let-bindings are allowed to shadow previous bindings.
 
-## Examples
+Progge's special built-ins and which part of Proggers makes use of them:
 
-[**Numerical Analysis**](analyzer-examples/numerical.progge):
-Proggers is able to analyze below program and find possible return values, as one can see from the bottom right "`z: [-1,0]`" indicating `z` may be `-1` or `0`.
+| Built-In       | Description | AI | SE | TC | C |
+|----------------|-------------|----|----|----|---|
+| `unreachable!` | Asserts that the control-flow may never reach this statement       |  [x]  |  [x]  |    |   |
+| `testcase!`    | Instructs generation of testcases which reach this statement        |  [x]  | [x]   |    |   |
+| `assume!(expr)` | Assumes the given bool expression as true           |  [x]  | [x]   |    |   |
+| `analyze!(expr)`| Instructs numerical analysis to print an over-approximation of the int expression | [x]   |    |    |   |
+| `int_arg(expr)`| Returns the expr-th command line argument converted to an int |    | [x]   |    | [x]  |
+| `print_int(expr)`| Prints the given int to stdout |    |    |    | [x]  |
+
+***Legend**: TC: Type-checking, SE: Symbolic Execution, AI: Abstract Interpertation, C: Compilation*
+## Features
+
+### Numerical Analysis using Abstract Interpretation
+
+Proggers is able to analyze [below program](analyzer-examples/numerical.progge) and find possible return values, as one can see from the bottom right "`z: [-1,0]`" indicating `z` may be `-1` or `0`.
 
 ```rust
 fn analyze(x: int, y: int) -> int {
@@ -103,11 +122,52 @@ gives the following feedback:
 *Note that again, unreachability analysis using abstract interpretation computes an **over-approximation** - that is
 it may give false positives (warn about reachable `unreachable!` statements that are in truth unreachable), but may never give false negatives
 (if there are no warnings about a `unreachable!`, then it is guaranteed that the statement is unreachable). 
-Once symbolic execution is implemented, that can be used to make guaranteed statements about reachability, i.e. under-approximate.*
+See [Symbolic Execution](#symbolic-execution) for guaranteed statements about reachability.*
 
 ![unreachable! feedback](analyzer-examples/unreachable.png)
 
-[**Type-checking**](analyzer-examples/scopes.progge): Proggers notices that there are five distinct variables called `x`, as one can see in the cleaned-up AST that Proggers returns:
+#### Guarantees
+Abstract interpretation ([Wikipedia](https://en.wikipedia.org/wiki/Abstract_interpretation)) computes an over-approximation,
+which means that all possible program behaviors (maybe more, but not less) are captured by it, i.e. the implication
+is "If the real program exhibits a behavior, then that behavior is contained in the abstract interpretation's over-approximation".
+
+In short, abstract interpretation can prove absence of unwanted program behaviors, which might be e.g. index-out-of-bounds
+exceptions(TODO), execution of `unreachable!` statements, or function calls whose arguments do not satisfy the function's preconditions.
+
+
+### Symbolic Execution
+
+[**testcase!**](analyzer-examples/symex_arr_hard.progge): Generates testcases (i.e. argument values for the function)
+that reach the statement. For example, running `proggers --typecheck --symex analyzer-examples/symex_arr_hard.progge` gives:
+
+*Note: Testcase generation also works for calls to `int_arg` - see [`symex_blackbox.progge`](analyzer-examples/symex_blackbox.progge)*
+
+```
+analyzer-examples/symex_arr_hard.progge:7:13: sample inputs reaching this statement:
+{ x = 1, y = 0 }
+{ x = 0, y = 1 }
+{ x = 0, y = 2 }
+{ x = 2, y = 1 }
+{ x = 1, y = 2 }
+```
+
+[**unreachable!**](analyzer-examples/unreachable.progge): Furthermore, if a given `unreachable!` is not actually unreachable, symbolic execution
+will throw an error and give a sample input that reaches the statement.
+For example, running `proggers --typecheck --symex analyzer-examples/unreachable.progge` gives:
+![unreachable! feedback](analyzer-examples/unreachable.symex.png)
+
+#### Guarantees
+
+Symbolic execution ([Wikipedia](https://en.wikipedia.org/wiki/Symbolic_execution)) computes an under-approximation, which means
+the implication is "If symbolic execution reports a path (set of input values), then the real program must also
+follow that path". 
+
+In short, symbolic execution can prove reachability of statements by giving concrete example inputs, or, in other words,
+it can prove presence of certain program behaviors.
+
+### Type-Checking
+
+[`let` shadowing/lexical scopes](analyzer-examples/scopes.progge): Proggers notices that there are five distinct variables called `x`, as one can see in the cleaned-up AST that Proggers returns:
 ```rust 
 // Original source code
 fn analyze(x: int) -> int {
@@ -158,7 +218,9 @@ fn foo() -> int {
 See [`analyzer-examples/tc_bad`](analyzer-examples/tc_bad) for more examples.
 
 
-[**Compilation**](codegen-examples/factorial.progge): Proggers can compile programs to native code.
+### Compilation
+
+Proggers can compile [programs](codegen-examples) to native code.
 ```shell
 $ proggers codegen-examples/factorial.progge -t -o factorial
 $ ./factorial 4

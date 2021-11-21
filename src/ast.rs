@@ -271,7 +271,7 @@ impl Display for LocExpr {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum Expr {
     IntLit(i64),
     BoolLit(bool),
@@ -388,7 +388,7 @@ pub struct OpcodeType<P>(pub P, pub Type)
 where
     P: Debug + Clone + PartialEq + Eq;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum BinOpcode {
     // int * int -> int
     Add,
@@ -448,7 +448,7 @@ impl Display for BinOpcode {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum UnOpcode {
     // int -> int
     Neg,
