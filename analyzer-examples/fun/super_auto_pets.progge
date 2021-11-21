@@ -1,0 +1,50 @@
+/*
+    Instructs the analyzer to compute the maximum number of plays one can have
+    in the popular auto-battler Super Auto Pets
+    https://store.steampowered.com/app/1714040/Super_Auto_Pets/
+*/
+
+// Takes the number of losses of each cost (1-live-cost, 2-live-cost and 3-live-cost)
+fn analyze(losses_1: int, losses_2: int, losses_3: int) {
+    assume!(losses_1 >= 0);
+    assume!(losses_2 >= 0);
+    assume!(losses_3 >= 0);
+
+    // There are only 2 rounds (rounds 1 and 2) where only 1 live is lost
+    assume!(losses_1 <= 2);
+    // There are only 2 rounds (rounds 3 and 4) where only 2 lives are lost
+    assume!(losses_2 <= 2);
+
+    let total_losses = losses_1 + losses_2 + losses_3;
+
+    let lives_lost_1 = losses_1;
+    let lives_lost_2 = 2 * losses_2;
+    let lives_lost_3 = 3 * losses_3;
+
+    // We want to still be alive after the last loss
+    assume!(lives_lost_1 + lives_lost_2 + lives_lost_3 < 10);
+
+    // ---------------------------------------------------------------------------------
+    // Symbolic execution proves these reachable and gives concrete inputs to reach them
+    if 4 == total_losses {
+        // Means that we can lose 4 times and still be alive
+        testcase!; // => 5 lives total
+    }
+    if 5 == total_losses {
+        // Means that we can lose 5 times and still be alive
+        testcase!; // => 6 lives total
+    }
+    // -------------------------------------------------------
+    // These are proved unreachable by abstract interpretation
+    if 6 == total_losses {
+        // Means that we can lose 6 times and still be alive
+        testcase!; // => 7 lives total
+    }
+    if 7 == total_losses {
+        // Means that we can lose 7 times and still be alive
+        testcase!; // => 8 lives total
+    }
+
+    return;
+}
+
