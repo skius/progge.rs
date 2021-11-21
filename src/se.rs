@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::ops::{Deref, DerefMut, Neg};
 use std::cell::RefCell;
+use std::hash::Hash;
 use std::time::SystemTime;
 use z3::ast::Ast;
 use z3::{Context};
@@ -129,7 +130,7 @@ impl Display for SymbolicArray {
     }
 }
 
-// SymbolicHeap is array_uid -> (length, (index -> symbolic_value))
+// SymbolicHeap is array_uid -> sym_array
 #[derive(Clone, Debug)]
 pub struct SymbolicHeap(pub HashMap<usize, SymbolicArray>);
 
@@ -184,16 +185,22 @@ impl SymbolicStore {
         match exp {
             Expr::Var(v) => vec![(self.0.get(&v.elem.0).unwrap().clone(), pct.clone(), sym_heap.clone())],
             Expr::Call(name, args) => {
-                // If we've reached recursion limit, assume `false` and underapproximate.
-                // This is equivalent to returning to paths to continue from.
+                // Handle builtins
+                if name.as_str() == "int_arg" {
+                    // Treat it as a new symbolic variable
+                    // Must be one argument
+                    let arg = &args[0];
+                    return self.symbolize(symex, arg, pct, sym_heap).into_iter().map(|(arg, pct, sym_heap)| {
+                        let args = WL::no_loc(vec![WL::no_loc(arg.into_expr().unwrap())]);
+                        (SymbolicValue::Expr(Expr::Call(name.clone(), args)), pct.clone(), sym_heap.clone())
+                    }).collect();
+                }
+                if name.as_str() == "print_int" {
+                    // print_int just passes the single argument through
+                    return self.symbolize(symex, &args[0], pct, sym_heap);
+                }
 
-                // println!("Reached call with {}, loc: {:?}, pct: {}", name, name.loc, pct);
-                // println!("{:?}", symex.function_invocations);
 
-                // if *symex.function_invocations.entry((name.loc, name.to_string())).or_insert(0) >= RECURSION_LIMIT {
-                //     return vec![];
-                // }
-                // *symex.function_invocations.get_mut(&(name.loc, name.to_string())).unwrap() += 1;
 
                 symex.run_call(name.as_str(), args, self, pct, sym_heap, |pct, sym_heap, ret_val| {
                     (ret_val.unwrap(), pct, sym_heap)
@@ -776,15 +783,18 @@ impl SymbolicExecutor {
 }
 
 pub fn string_of_model<'a>((int_map, bool_map): &Model, order: impl Iterator<Item = &'a Var>) -> String {
+    let mut visited = HashSet::new();
+
     let mut res = String::new();
     let mut first = true;
     res.push_str("{ ");
     for v in order {
+        visited.insert(&v.0);
         let (k, _) = v.rsplit_once("_").unwrap();
 
         let val_string = match &v.1 {
             Type::Int => int_map[v.as_str()].to_string(),
-            Type::Bool => bool_map[v.as_str()] .to_string(),
+            Type::Bool => bool_map[v.as_str()].to_string(),
             t => panic!("unexpected type {:?}", t),
         };
 
@@ -795,6 +805,28 @@ pub fn string_of_model<'a>((int_map, bool_map): &Model, order: impl Iterator<Ite
         }
         res.push_str(&format!("{} = {}", k, val_string));
     }
+    for (iv, i) in int_map {
+        if !visited.contains(iv) {
+            if !first {
+                res.push_str(", ");
+            } else {
+                first = false;
+            }
+            res.push_str(&format!("{} = {}", iv, i));
+        }
+    }
+
+    for (bv, b) in bool_map {
+        if !visited.contains(bv) {
+            if !first {
+                res.push_str(", ");
+            } else {
+                first = false;
+            }
+            res.push_str(&format!("{} = {}", bv, b));
+        }
+    }
+
     res.push_str(" }");
     res
 }
@@ -891,7 +923,9 @@ pub fn satisfiable(pct: &Expr) -> SatResult {
             // if bests[0].to_string() == "false" {
             //     println!("egg said false, z3 didn't");
             // }
-            let model = map_of_model(&ctx, solver.get_model().unwrap(), &pct.free_vars());
+            let fv = pct.free_vars();
+            let calls = call_fv(pct);
+            let model = map_of_model(&ctx, solver.get_model().unwrap(), &fv, &calls);
             // Uncomment if you want caching (slower atm)
             cache::insert(pct, model.clone());
             SatResult::Sat(model)
@@ -912,7 +946,51 @@ pub fn satisfiable(pct: &Expr) -> SatResult {
     res
 }
 
-fn map_of_model(ctx: &z3::Context, model: z3::Model, fv: &HashSet<Var>) -> (HashMap<String, i64>, HashMap<String, bool>) {
+fn call_fv(e: &Expr) -> HashSet<(String, Expr)> {
+    let mut res = HashSet::new();
+    match e {
+        c@Expr::Call(_, args) => {
+            // TODO: Assuming int_arg
+            let arg_calls = args.elem.iter()
+                .map(|arg| call_fv(arg))
+                .fold(HashSet::new(), |mut acc, fv| {
+                    acc.extend(fv);
+                    acc
+                });
+            res.insert((c.to_string(), c.clone()));
+            res.extend(arg_calls);
+            res
+        }
+        Expr::BinOp(_, left, right) => {
+            res.extend(call_fv(left));
+            res.extend(call_fv(right));
+            res
+        }
+        Expr::UnOp(_, inner) => {
+            res.extend(call_fv(inner));
+            res
+        }
+        Expr::Array(els) => {
+            for el in els.iter() {
+                res.extend(call_fv(el));
+            }
+            res
+        }
+        Expr::DefaultArray { default_value, size } => {
+            res.extend(call_fv(default_value));
+            res.extend(call_fv(size));
+            res
+        }
+        Expr::Index(arr, idx) => {
+            res.extend(call_fv(arr));
+            res.extend(call_fv(idx));
+            res
+        }
+        _ => res,
+    }
+}
+
+fn map_of_model(ctx: &z3::Context, model: z3::Model, fv: &HashSet<Var>, calls: &HashSet<(String, Expr)>) -> (HashMap<String, i64>, HashMap<String, bool>) {
     let mut int_map = HashMap::new();
     let mut bool_map = HashMap::new();
 
@@ -931,6 +1009,13 @@ fn map_of_model(ctx: &z3::Context, model: z3::Model, fv: &HashSet<Var>) -> (Hash
                 }
             }
             t => panic!("Unexpected type: {:?}", t),
+        }
+    }
+
+    for (call_name, call) in calls {
+        let val = model.eval(&expr_to_z3_int(ctx, call), false).unwrap().as_i64();
+        if let Some(val) = val {
+            int_map.insert(call_name.clone(), val);
         }
     }
 
@@ -1017,6 +1102,17 @@ fn expr_to_z3_int<'a>(ctx: &'a Context, exp: &Expr) -> z3::ast::Int<'a> {
                 UnOpcode::Neg => expr_to_z3_int(ctx, inner).neg(),
                 op => panic!("unsupported unop: {:?}", op),
             }
+        }
+        Expr::Call(name, args) => {
+            // only builtins should appear here such as int_arg
+            if name.as_str() != "int_arg" {
+                panic!("unsupported call: {}", exp);
+            }
+            let args = args.iter().map(|arg| expr_to_z3_int(ctx, arg)).collect::<Vec<_>>();
+            let dynamic_args = args.iter().map(|arg| arg as &dyn z3::ast::Ast).collect::<Vec<_>>();
+            // TODO: adjust these types
+            let f = z3::FuncDecl::new(ctx, name.as_str(), &[&z3::Sort::int(ctx)], &z3::Sort::int(ctx));
+            f.apply(&dynamic_args[..]).as_int().unwrap()
         }
         exp => panic!("unsupported int expr: {:?}", exp),
     }
@@ -1316,6 +1412,15 @@ mod interp {
                 match &op.elem {
                     UnOpcode::Neg => -inner_val,
                     op => panic!("Unsupported unop: {}", op),
+                }
+            }
+            c@Expr::Call(name, args) => {
+                // Should be only builtins
+                if name.as_str() == "int_arg" {
+                    let call_name = c.to_string();
+                    *model.0.get(call_name.as_str()).unwrap_or(&0)
+                } else {
+                    panic!("Unsupported function call to: {}", name);
                 }
             }
             e => panic!("Unsupported expression: {}", e),

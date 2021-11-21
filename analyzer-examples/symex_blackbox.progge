@@ -1,0 +1,11 @@
+fn analyze(x: int, y: int) {
+    let first_arg = int_arg(x);
+    let second_arg = int_arg(y);
+    if first_arg != second_arg && x == y {
+        // unreachable by congruence
+        testcase!;
+    }
+    return;
+}
+
+
