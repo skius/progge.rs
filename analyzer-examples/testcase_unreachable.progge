@@ -1,0 +1,9 @@
+fn analyze(x: int, y: int, z: int) {
+    if x == 0 {
+        if x == 1 {
+            testcase!;
+        }
+    }
+    return;
+}
+

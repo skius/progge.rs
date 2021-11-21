@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::Hash;
 
 use elina::ast::{Abstract, Environment, Hcons, Interval, Manager, OptPkManager, Texpr, TexprBinop, TexprUnop};
 use petgraph::dot::{Config, Dot};
@@ -18,18 +19,19 @@ use crate::ir::IRNode::IRReturn;
 
 // TODO: disconnect from the cfg's internal graph representation
 /// This holds necessary information and results of abstract interpretation.
-pub struct AbstractInterpretationEnvironment<'a, M: Manager> {
+pub struct AbstractInterpretationEnvironment<M: Manager> {
     pub man: M,
     pub env: Environment,
     pub edge_state_map: HashMap<EdgeIndex, Abstract>,
+    pub node_state_map: HashMap<NodeIndex, Abstract>,
     // bounds in points of interest, e.g. analyze! calls
     pub saved_states: HashMap<Loc, (Interval, Abstract)>,
     // states for unreachable!
     pub unreachable_states: HashMap<Loc, Abstract>,
-    pub cfg: &'a IntraProcCFG,
+    pub cfg: IntraProcCFG,
 }
 
-impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
+impl<M: Manager> AbstractInterpretationEnvironment<M> {
     pub fn graphviz(&self) -> String {
         let edge_getter = |_, edge: EdgeReference<IREdge>| {
             let mut intervals = "".to_owned();
@@ -156,14 +158,15 @@ fn env_from_cfg(cfg: &IntraProcCFG) -> Environment {
 
 static WIDENING_THRESHOLD: usize = 100;
 
-pub fn run(cfg: &IntraProcCFG) -> AbstractInterpretationEnvironment<impl Manager> {
-    let man = OptPkManager::default();
-    let env = env_from_cfg(cfg);
+pub fn run<M: Default + Manager>(cfg: IntraProcCFG) -> AbstractInterpretationEnvironment<M> {
+    let man = M::default();
+    let env = env_from_cfg(&cfg);
 
     let mut res = AbstractInterpretationEnvironment {
         man,
         env,
         edge_state_map: HashMap::new(),
+        node_state_map: HashMap::new(),
         saved_states: HashMap::new(),
         unreachable_states: HashMap::new(),
         cfg,
@@ -175,8 +178,18 @@ pub fn run(cfg: &IntraProcCFG) -> AbstractInterpretationEnvironment<impl Manager
     res
 }
 
-impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
-    
+impl<M: Manager> AbstractInterpretationEnvironment<M> {
+
+    pub fn get_loc_map(&self) -> HashMap<Loc, NodeIndex> {
+        let mut loc_map = HashMap::new();
+        for nx in self.cfg.graph.node_indices() {
+            let irn = &self.cfg.graph[nx];
+            loc_map.insert(irn.loc.clone(), nx);
+        }
+
+        loc_map
+    }
+
     /// This function returns a map from each edge to the abstract state at that edge.
     pub fn run(&mut self) {
         let entry = self.cfg.entry;
@@ -286,6 +299,7 @@ impl<'a, M: Manager> AbstractInterpretationEnvironment<'a, M> {
             }
         }
 
+        self.node_state_map = prev_state_of_nodes;
     }
 
 }

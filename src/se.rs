@@ -547,10 +547,19 @@ impl SymbolicExecutor {
                 return vec![(store.clone(), new_pct, sym_heap.clone(), ret_val.clone())];
             }
             Stmt::Call(name, args) => {
-                // if *self.function_invocations.entry((name.loc, name.to_string())).or_insert(0) >= RECURSION_LIMIT {
-                //     return vec![];
-                // }
-                // *self.function_invocations.get_mut(&(name.loc, name.to_string())).unwrap() += 1;
+                // Built-ins' only side-effects are that they might change the symbolic heap.
+                if name.as_str() == "analyze!" {
+                    return args.iter().fold(
+                        vec![(store.clone(), pct.clone(), sym_heap.clone(), ret_val.clone())],
+                        |acc, arg| {
+                            acc.into_iter().flat_map(|(store, pct, sym_heap, ret_val)| {
+                                store.symbolize(self, arg, &pct, &sym_heap).into_iter().map(|(sym_arg, pct, sym_heap)| {
+                                    (store.clone(), pct, sym_heap, ret_val.clone())
+                                }).collect::<Vec<_>>()
+                            }).collect()
+                        },
+                    );
+                }
 
 
                 self.run_call(name.as_str(), args, store, pct, sym_heap, |pct, sym_heap, _ret_val| {

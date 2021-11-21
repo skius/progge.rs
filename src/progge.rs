@@ -8,6 +8,7 @@ use std::process::exit;
 use ariadne::{Color, Fmt, Label, Report, Source};
 
 use proggers::*;
+use proggers::ana::Analyzer;
 use proggers::ast::*;
 use proggers::ir::IntraProcCFG;
 use proggers::se::{bound_loops, fill_model, run_symbolic_execution, string_of_model};
@@ -32,7 +33,7 @@ fn main() -> Result<(), TcError> {
         println!("{}", analyze.graphviz());
     }
     if config.do_tc {
-        // typechcek the program
+        // typecheck the program
         let mut tc = TypeChecker::new(FuncTypeContext::from(&*prog), src_file, src.clone());
         let res = tc.tc_prog(&mut prog);
         if let Err(err) = res {
@@ -47,124 +48,129 @@ fn main() -> Result<(), TcError> {
         println!("{}", prog);
     }
     if config.do_analyze {
+
         let analyze = IntraProcCFG::from(&**prog.find_funcdef("analyze").unwrap());
-        let ai_env = proggers::ai::run(&analyze);
-        println!("{}", ai_env.graphviz());
 
-        let mut saved_states_keys = ai_env.saved_states.keys().collect::<Vec<_>>();
-
-        saved_states_keys.sort_by_key(|l| l.start);
-        for loc in saved_states_keys {
-            let (bound, state) = &ai_env.saved_states[loc];
-            if bound.0 > bound.1 {
-                // Unreachable
-                Report::build(ariadne::ReportKind::Warning, src_file, loc.start)
-                    .with_label(
-                        Label::new(
-                            (src_file, loc.range())
-                        )
-                            .with_message("expression is unreachable")
-                            .with_color(Color::Yellow)
-                    )
-                    .with_note(
-                        format!("if this is intentional, consider using {} instead", "unreachable!".fg(Color::Yellow))
-                    )
-                    .finish()
-                    .print((src_file, Source::from(src.clone())))
-                    .unwrap();
-            } else {
-                Report::build(ariadne::ReportKind::Advice, src_file, loc.start)
-                    .with_label(
-                        Label::new(
-                            (src_file, loc.range())
-                        )
-                            .with_message(
-                                format!(
-                                    "expression may assume at most the values {} - state is {}",
-                                    format!("{:?}", bound).fg(Color::Cyan),
-                                    format!("{}", state.to_string(&ai_env.man, &ai_env.env)).fg(Color::Cyan),
-                                )
-                            )
-                            .with_color(Color::Cyan)
-                    )
-                    .finish()
-                    .print((src_file, Source::from(src.clone())))
-                    .unwrap();
-            }
-        }
-
-        let mut unreachable_states_keys = ai_env.unreachable_states.keys().collect::<Vec<_>>();
-        unreachable_states_keys.sort_by_key(|l| l.start);
-        for loc in unreachable_states_keys {
-            // TODO: once symbolic execution is added, add possible cases that reach this statement
-            let state = &ai_env.unreachable_states[loc];
-            if !state.is_bottom(&ai_env.man) {
-                Report::build(ariadne::ReportKind::Warning, src_file, loc.start)
-                    .with_label(
-                        Label::new(
-                            (src_file, loc.range())
-                        )
-                            .with_message(
-                                format!(
-                                    "statement may be reachable - state is {}",
-                                    state.to_string(&ai_env.man, &ai_env.env).fg(Color::Cyan)
-                                )
-                            )
-                            .with_color(Color::Yellow)
-                    )
-                    .finish()
-                    .print((src_file, Source::from(src.clone())))
-                    .unwrap();
-            }
-        }
+        let mut analyzer = Analyzer::new(config.verbose, prog.elem.clone(), src_file.clone(), src.clone(), "analyze");
+        analyzer.run_ai(analyze);
+        analyzer.run_symex();
+        analyzer.analyze();
 
 
-        // TODO: combine symex + AI results
-        let (unrolled, did_bound) = bound_loops(&*prog);
-        // if did_bound is true, then any statements about unreachability are in fact guarantees.
-        // println!("{}", unrolled);
-        let mut symex = run_symbolic_execution(unrolled.clone());
-        // the symbolix variables
-        let analyze_params = unrolled.find_funcdef("analyze").unwrap().params.iter().map(|(v, _)| &v.elem);
-        let analyze_params_set = analyze_params.clone().cloned().collect();
+        // let mut saved_states_keys = ai_env.saved_states.keys().collect::<Vec<_>>();
+        //
+        // saved_states_keys.sort_by_key(|l| l.start);
+        // for loc in saved_states_keys {
+        //     let (bound, state) = &ai_env.saved_states[loc];
+        //     if bound.0 > bound.1 {
+        //         // Unreachable
+        //         Report::build(ariadne::ReportKind::Warning, src_file, loc.start)
+        //             .with_label(
+        //                 Label::new(
+        //                     (src_file, loc.range())
+        //                 )
+        //                     .with_message("expression is unreachable")
+        //                     .with_color(Color::Yellow)
+        //             )
+        //             .with_note(
+        //                 format!("if this is intentional, consider using {} instead", "unreachable!".fg(Color::Yellow))
+        //             )
+        //             .finish()
+        //             .print((src_file, Source::from(src.clone())))
+        //             .unwrap();
+        //     } else {
+        //         Report::build(ariadne::ReportKind::Advice, src_file, loc.start)
+        //             .with_label(
+        //                 Label::new(
+        //                     (src_file, loc.range())
+        //                 )
+        //                     .with_message(
+        //                         format!(
+        //                             "expression may assume at most the values {} - state is {}",
+        //                             format!("{:?}", bound).fg(Color::Cyan),
+        //                             format!("{}", state.to_string(&ai_env.man, &ai_env.env)).fg(Color::Cyan),
+        //                         )
+        //                     )
+        //                     .with_color(Color::Cyan)
+        //             )
+        //             .finish()
+        //             .print((src_file, Source::from(src.clone())))
+        //             .unwrap();
+        //     }
+        // }
+
+        // let mut unreachable_states_keys = ai_env.unreachable_states.keys().collect::<Vec<_>>();
+        // unreachable_states_keys.sort_by_key(|l| l.start);
+        // for loc in unreachable_states_keys {
+        //     // TxODO: once symbolic execution is added, add possible cases that reach this statement
+        //     let state = &ai_env.unreachable_states[loc];
+        //     if !state.is_bottom(&ai_env.man) {
+        //         Report::build(ariadne::ReportKind::Warning, src_file, loc.start)
+        //             .with_label(
+        //                 Label::new(
+        //                     (src_file, loc.range())
+        //                 )
+        //                     .with_message(
+        //                         format!(
+        //                             "statement may be reachable - state is {}",
+        //                             state.to_string(&ai_env.man, &ai_env.env).fg(Color::Cyan)
+        //                         )
+        //                     )
+        //                     .with_color(Color::Yellow)
+        //             )
+        //             .finish()
+        //             .print((src_file, Source::from(src.clone())))
+        //             .unwrap();
+        //     }
+        // }
+
+
+        // TxODO: combine symex + AI results -- done in analyzer
+        // let (unrolled, did_bound) = bound_loops(&*prog);
+        // // if did_bound is true, then any statements about unreachability are in fact guarantees.
+        // // println!("{}", unrolled);
+        // let mut symex = run_symbolic_execution(unrolled.clone());
+        // // the symbolix variables
+        // let analyze_params = unrolled.find_funcdef("analyze").unwrap().params.iter().map(|(v, _)| &v.elem);
+        // let analyze_params_set = analyze_params.clone().cloned().collect();
         // Guaranteed reachable, i.e. provably incorrect
-        let mut unreachable_paths_keys = symex.unreachable_paths.keys().cloned().collect::<Vec<_>>();
-        unreachable_paths_keys.sort_by_key(|l| l.start);
-        for loc in &unreachable_paths_keys {
-            let model = symex.unreachable_paths.get_mut(loc).unwrap();
-            fill_model(model, &analyze_params_set);
-            let model_string = string_of_model(model, analyze_params.clone());
-            Report::build(ariadne::ReportKind::Error, src_file, loc.start)
-                .with_label(
-                    Label::new(
-                        (src_file, loc.range())
-                    )
-                        .with_message(
-                            format!(
-                                "statement is reachable with the following inputs: {}",
-                                model_string.fg(Color::Red)
-                            )
-                        )
-                        .with_color(Color::Red)
-                )
-                .finish()
-                .print((src_file, Source::from(src.clone())))
-                .unwrap();
-        }
+        // let mut unreachable_paths_keys = symex.unreachable_paths.keys().cloned().collect::<Vec<_>>();
+        // unreachable_paths_keys.sort_by_key(|l| l.start);
+        // for loc in &unreachable_paths_keys {
+        //     let model = symex.unreachable_paths.get_mut(loc).unwrap();
+        //     fill_model(model, &analyze_params_set);
+        //     let model_string = string_of_model(model, analyze_params.clone());
+        //     Report::build(ariadne::ReportKind::Error, src_file, loc.start)
+        //         .with_label(
+        //             Label::new(
+        //                 (src_file, loc.range())
+        //             )
+        //                 .with_message(
+        //                     format!(
+        //                         "statement is reachable with the following inputs: {}",
+        //                         model_string.fg(Color::Red)
+        //                     )
+        //                 )
+        //                 .with_color(Color::Red)
+        //         )
+        //         .finish()
+        //         .print((src_file, Source::from(src.clone())))
+        //         .unwrap();
+        // }
 
-        let mut testcases_keys = symex.testcases.keys().cloned().collect::<Vec<_>>();
-        testcases_keys.sort_by_key(|l| l.start);
-        for loc in &testcases_keys {
-            let models = symex.testcases.get_mut(loc).unwrap();
-            println!("-----------------------");
-            println!("{}:{}:{}: sample inputs reaching this statement:", src_file, loc.line, loc.col);
-            models.dedup();
-            for model in models {
-                fill_model(model, &analyze_params_set);
-                let model_string = string_of_model(model, analyze_params.clone());
-                println!("{}", model_string);
-            }
-        }
+        // let mut testcases_keys = symex.testcases.keys().cloned().collect::<Vec<_>>();
+        // testcases_keys.sort_by_key(|l| l.start);
+        // for loc in &testcases_keys {
+        //     let models = symex.testcases.get_mut(loc).unwrap();
+        //     println!("-----------------------");
+        //     println!("{}:{}:{}: sample inputs reaching this statement:", src_file, loc.line, loc.col);
+        //     models.dedup();
+        //     for model in models {
+        //         fill_model(model, &analyze_params_set);
+        //         let model_string = string_of_model(model, analyze_params.clone());
+        //         println!("{}", model_string);
+        //     }
+        // }
     }
     if let Some(output) = config.compile_target {
         proggers::compiler::compile(prog.clone().elem, &output, config.verbose);

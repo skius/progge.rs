@@ -1,0 +1,9 @@
+fn analyze(x: int, y: int, z: int) {
+    assume!(x > 0 && y > 0 && z > 0);
+    if x*x*x + y*y*y == z*z*z {
+        // Unknown whether this is reachable or not
+        testcase!;
+    }
+    return;
+}
+

@@ -1,5 +1,5 @@
 fn analyze(x: int, y: int, z: bool) {
-    if z  {
+    if z {
         return;
     }
     let i = 0;
