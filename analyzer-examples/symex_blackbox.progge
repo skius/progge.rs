@@ -4,9 +4,13 @@ fn analyze(x: int, y: int) {
     if first_arg != second_arg && x == y {
         // unreachable by congruence
         testcase!;
+    /*  ^^^^^^^^^ no testcases found */
     }
     if first_arg > second_arg {
         testcase!;
+    /*  ^^^^^^^^^ reported testcases:
+        { x = 2, y = 3, int_arg(x_1) = 0, int_arg(y_1) = -1 }
+    */
     }
     return;
 }

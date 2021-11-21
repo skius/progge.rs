@@ -6,11 +6,17 @@ fn analyze(x: int) {
         x = x + i;
         i = i + 1;
         testcase!;
+    /*  ^^^^^^^^^ reported testcases:
+        { x = 0 }
+    */
     }
 
     if x_prev < x + 5 {
         // Clearly reachable
         unreachable!;
+    /*  ^^^^^^^^^^^^ reported testcase:
+        { x = 0 }
+    */
     }
 
     return;

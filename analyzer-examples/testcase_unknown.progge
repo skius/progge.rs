@@ -3,6 +3,7 @@ fn analyze(x: int, y: int, z: int) {
     if x*x*x + y*y*y == z*z*z {
         // Unknown whether this is reachable or not
         testcase!;
+    /*  ^^^^^^^^^ no testcases found */
     }
     return;
 }

@@ -6,9 +6,21 @@ fn analyze(x: int, y: int, n: int) {
 
         if gcd > n {
             testcase!;
+        /*  ^^^^^^^^^ reported testcases:
+            { x = 81, y = 135, n = 26 }
+            { x = 14499, y = 14526, n = 26 }
+            { x = 27, y = 108, n = 26 }
+            { x = 0, y = 27, n = 26 }
+        */
         }
         if gcd_rec > n {
             testcase!;
+        /*  ^^^^^^^^^ reported testcases:
+            { x = 81, y = 135, n = 26 }
+            { x = 14499, y = 14526, n = 26 }
+            { x = 27, y = 108, n = 26 }
+            { x = 0, y = 27, n = 26 }
+        */
         }
 
         if gcd == gcd_rec {
@@ -16,12 +28,16 @@ fn analyze(x: int, y: int, n: int) {
             // in this case, only symbolic execution can deliver a proof in form of a concrete
             // set of input values that reach this statement.
             unreachable!;
+        /*  ^^^^^^^^^^^^ reported testcase:
+            { x = 81, y = 135, n = 26 }
+        */
         }
 
         if gcd != gcd_rec {
             // While this is truly unreachable, neither abstract interpretation nor symbolic execution
             // can deliver a proof for this.
             unreachable!;
+        /*  ^^^^^^^^^^^^ unknown reachability */
         }
         return;
     }
@@ -31,19 +47,19 @@ fn analyze(x: int, y: int, n: int) {
 
 // Both a recursive GCD definition ...
 fn gcd_rec(a: int, b: int) -> int {
-    if b == 0 {
-        return a;
-    }
-    return gcd_rec(b, a % b);
+if b == 0 {
+    return a;
+}
+return gcd_rec(b, a % b);
 }
 
 // ... and an iterative definition work.
 fn gcd(a: int, b: int) -> int {
-    let temp = 0;
-    while b != 0 {
-        temp = b;
-        b = a % b;
-        a = temp;
-    }
-    return a;
+let temp = 0;
+while b != 0 {
+    temp = b;
+    b = a % b;
+    a = temp;
+}
+return a;
 }

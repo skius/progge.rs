@@ -9,6 +9,9 @@ fn analyze(x: int, y: int, z: bool) {
     if i == 0 {
         // is reachable
         unreachable!;
+    /*  ^^^^^^^^^^^^ reported testcase:
+        { x = 0, y = 0, z = false }
+    */
     }
 
     let j = 0;
@@ -19,9 +22,8 @@ fn analyze(x: int, y: int, z: bool) {
     }
 
     if j == 0 {
-        // numerical abstract interpretation cannot handle this - there is no relation between {x,y} and j
-        // it is truly unreachable
         unreachable!;
+    /*  ^^^^^^^^^^^^ proven by AI to be unreachable */
     }
 
     return;

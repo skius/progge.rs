@@ -7,11 +7,19 @@ fn analyze(x: int) {
     let y = x * 2;
     if x + y < 9 {
         analyze!(x / 3);
+    /*           ^^^^^
+        values: [-oo, 1]
+        state:  { 2x_1 - y_1 = 0; -3y_1 + 16 >= 0 }
+    */
         if x/3 > 1 {
             analyze!(x);
+        /*  ^^^^^^^^^^^ AI proves unreachability */
         }
         analyze!(x);
-
+    /*           ^
+        values: [-oo, 2]
+        state:  { 2x_1 - y_1 = 0; -3y_1 + 16 >= 0 }
+    */
     }
     return;
 }

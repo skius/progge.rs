@@ -6,18 +6,29 @@ fn analyze(x: int, y: int, z: int, a: bool) {
     let y_squared = y * y;
     if x_squared + y_squared == z * z {
         testcase!;
+    /*  ^^^^^^^^^ reported testcases:
+        { x = 12, y = 9, z = 15, a = false }
+    */
     }
 
     if x_squared < 0 {
         unreachable!;
+    /*  ^^^^^^^^^^^^ proven by AI to be unreachable */
     }
 
     if x_squared > y_squared {
         unreachable!;
+    /*  ^^^^^^^^^^^^ reported testcase:
+        { x = 12, y = 9, z = 15, a = false }
+    */
     }
 
     while x_squared < y_squared && a {
         testcase!;
+    /*  ^^^^^^^^^ reported testcases:
+        { x = 6, y = 8, z = 10, a = true }
+        { x = 15, y = 16, z = 16, a = true }
+    */
         x_squared = x_squared + 1;
     }
 
