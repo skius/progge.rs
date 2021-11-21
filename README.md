@@ -126,6 +126,15 @@ See [Symbolic Execution](#symbolic-execution) for guaranteed statements about re
 
 ![unreachable! feedback](analyzer-examples/unreachable.png)
 
+#### Guarantees
+Abstract interpretation ([Wikipedia](https://en.wikipedia.org/wiki/Abstract_interpretation)) computes an over-approximation,
+which means that all possible program behaviors (maybe more, but not less) are captured by it, i.e. the implication
+is "If the real program exhibits a behavior, then that behavior is contained in the abstract interpretation's over-approximation".
+
+In short, abstract interpretation can prove absence of unwanted program behaviors, which might be e.g. index-out-of-bounds
+exceptions(TODO), execution of `unreachable!` statements, or function calls whose arguments do not satisfy the function's preconditions.
+
+
 ### Symbolic Execution
 
 [**testcase!**](analyzer-examples/symex_arr_hard.progge): Generates testcases (i.e. argument values for the function)
@@ -146,6 +155,15 @@ analyzer-examples/symex_arr_hard.progge:7:13: sample inputs reaching this statem
 will throw an error and give a sample input that reaches the statement.
 For example, running `proggers --typecheck --symex analyzer-examples/unreachable.progge` gives:
 ![unreachable! feedback](analyzer-examples/unreachable.symex.png)
+
+#### Guarantees
+
+Symbolic execution ([Wikipedia](https://en.wikipedia.org/wiki/Symbolic_execution)) computes an under-approximation, which means
+the implication is "If symbolic execution reports a path (set of input values), then the real program must also
+follow that path". 
+
+In short, symbolic execution can prove reachability of statements by giving concrete example inputs, or, in other words,
+it can prove presence of certain program behaviors.
 
 ### Type-Checking
 
