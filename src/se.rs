@@ -394,6 +394,10 @@ pub fn run_symbolic_execution(prog: Program) -> SymbolicExecutor {
         println!("Cache contained {:?} entries", c.borrow().keys().len());
     });
 
+    Z3_CACHE_HITS.with(|c| {
+        println!("Cache hits: {}", c.borrow());
+    });
+
     Z3_TIME.with(|t| {
        println!("Took Z3: {}ms, {}s", *t.borrow(), (*t.borrow())/1000);
     });
@@ -900,6 +904,7 @@ impl SatResult {
 thread_local! {
     pub static Z3_TIME: RefCell<u128> = RefCell::new(0);
     pub static Z3_INVOCATIONS: RefCell<u64> = RefCell::new(0);
+    pub static Z3_CACHE_HITS: RefCell<u64> = RefCell::new(0);
 }
 
 pub fn satisfiable(pct: &Expr) -> SatResult {
@@ -913,6 +918,7 @@ pub fn satisfiable(pct: &Expr) -> SatResult {
     if let Some(model) = cache::satisfiable(pct) {
         // println!("Cache hit! PCT: {}, model {:?}", pct, &model);
         cache::insert(pct, model.clone());
+        Z3_CACHE_HITS.with(|c| *c.borrow_mut() += 1);
         return SatResult::Sat(model);
     }
 
