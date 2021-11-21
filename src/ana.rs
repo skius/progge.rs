@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use ariadne::{Color, Fmt, Label, Report, Source};
 use elina::ast::{Manager, OptPkManager, Abstract};
 use petgraph::graph::NodeIndex;
@@ -13,7 +14,7 @@ pub struct Analyzer {
     src_file: String,
     src_content: String,
     analyzed_fn: String,
-    symex: Option<SymbolicExecutor>,
+    symex: Option<Arc<SymbolicExecutor>>,
     ai: Option<(AbstractInterpretationEnvironment<OptPkManager>, HashMap<Loc, NodeIndex>)>,
 }
 
@@ -94,7 +95,7 @@ impl Analyzer {
                     let analyze_params = self.prog.find_funcdef(&self.analyzed_fn).unwrap().params.iter().map(|p| &p.0.elem);
                     let analyze_params_set = analyze_params.clone().cloned().collect();
 
-                    let mut models = symex.testcases.get(loc).cloned().unwrap_or(vec![]);
+                    let mut models = symex.testcases.lock().unwrap().get(loc).cloned().unwrap_or(vec![]);
                     if models.len() > 0 {
                         // There were some testcases, i.e. a proof of reachability
                         println!("-----------------------");
@@ -260,7 +261,7 @@ impl Analyzer {
     fn is_reachable(&self, loc: &Loc) -> Option<Model> {
         // Only abstract interpretation can give unreachability proofs
         if let Some(se) = &self.symex {
-            return se.unreachable_paths.get(loc).cloned();
+            return se.unreachable_paths.lock().unwrap().get(loc).cloned();
         }
 
         // No proof possible

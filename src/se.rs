@@ -4,9 +4,11 @@ use std::fmt::{Display, Formatter};
 use std::ops::{Deref, DerefMut, Neg};
 use std::cell::RefCell;
 use std::hash::Hash;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use z3::ast::Ast;
 use z3::{Context};
+use rayon::prelude::*;
 use crate::ast::*;
 use crate::ir::IntraProcCFG;
 use crate::opt::{get_bests, sexp_of_expr};
@@ -181,7 +183,7 @@ pub struct SymbolicStore(pub HashMap<String, SymbolicValue>);
 type PathConstraint = Expr;
 
 impl SymbolicStore {
-    fn symbolize(&self, symex: &mut SymbolicExecutor, exp: &Expr, pct: &PathConstraint, sym_heap: &SymbolicHeap) -> Vec<(SymbolicValue, PathConstraint, SymbolicHeap)> {
+    fn symbolize(&self, symex: &Arc<SymbolicExecutor>, exp: &Expr, pct: &PathConstraint, sym_heap: &SymbolicHeap) -> Vec<(SymbolicValue, PathConstraint, SymbolicHeap)> {
         match exp {
             Expr::Var(v) => vec![(self.0.get(&v.elem.0).unwrap().clone(), pct.clone(), sym_heap.clone())],
             Expr::Call(name, args) => {
@@ -190,7 +192,7 @@ impl SymbolicStore {
                     // Treat it as a new symbolic variable
                     // Must be one argument
                     let arg = &args[0];
-                    return self.symbolize(symex, arg, pct, sym_heap).into_iter().map(|(arg, pct, sym_heap)| {
+                    return self.symbolize(symex, arg, pct, sym_heap).into_par_iter().map(|(arg, pct, sym_heap)| {
                         let args = WL::no_loc(vec![WL::no_loc(arg.into_expr().unwrap())]);
                         (SymbolicValue::Expr(Expr::Call(name.clone(), args)), pct.clone(), sym_heap.clone())
                     }).collect();
@@ -207,8 +209,8 @@ impl SymbolicStore {
                 })
             }
             Expr::BinOp(op, left, right) => {
-                self.symbolize(symex, left, pct, sym_heap).into_iter().flat_map(|(l, pl, sym_heapl)| {
-                    self.symbolize(symex, right, &pl, &sym_heapl).into_iter().map(|(r, pr, sym_heapr)| {
+                self.symbolize(symex, left, pct, sym_heap).into_par_iter().flat_map(|(l, pl, sym_heapl)| {
+                    self.symbolize(symex, right, &pl, &sym_heapl).into_par_iter().map(|(r, pr, sym_heapr)| {
                         (
                             SymbolicValue::Expr(Expr::BinOp(
                                 op.clone(),
@@ -218,7 +220,7 @@ impl SymbolicStore {
                             pr,
                             sym_heapr,
                         )
-                    }).collect::<Vec<_>>().into_iter()
+                    }).collect::<Vec<_>>()
                 }).collect()
                 // Expr::BinOp(
                 //     op.clone(),
@@ -227,7 +229,7 @@ impl SymbolicStore {
                 // )
             }
             Expr::UnOp(op, inner) => {
-                self.symbolize(symex, inner, pct, sym_heap).into_iter().map(|(sym_exp, pct, sym_heap)| {
+                self.symbolize(symex, inner, pct, sym_heap).into_par_iter().map(|(sym_exp, pct, sym_heap)| {
                     (
                         SymbolicValue::Expr(Expr::UnOp(
                             op.clone(),
@@ -252,8 +254,8 @@ impl SymbolicStore {
                 let folded = exps.iter().fold(
                     vec![(vec![], (pct.clone(), sym_heap.clone()))],
                     |acc, exp| {
-                        acc.into_iter().flat_map(|(sym_args, (pct, sym_heap))| {
-                            self.symbolize(symex, exp, &pct, &sym_heap).into_iter().map(|(sym_exp, pct, sym_heap)| {
+                        acc.into_par_iter().flat_map(|(sym_args, (pct, sym_heap))| {
+                            self.symbolize(symex, exp, &pct, &sym_heap).into_par_iter().map(|(sym_exp, pct, sym_heap)| {
                                 let mut sym_args = sym_args.clone();
                                 sym_args.push(sym_exp);
 
@@ -263,7 +265,7 @@ impl SymbolicStore {
                     }
                 );
 
-                folded.into_iter().map(|(sym_args, (pct, mut sym_heap))| {
+                folded.into_par_iter().map(|(sym_args, (pct, mut sym_heap))| {
                     debug_assert!(sym_args.len() == arr_len);
 
                     let ptr = sym_heap.new_ptr();
@@ -279,8 +281,8 @@ impl SymbolicStore {
             }
             // TODO: Default array. needs a different representation in SymbolicHeap I assume.
             Expr::DefaultArray { default_value, size } => {
-                self.symbolize(symex, default_value, pct, sym_heap).into_iter().flat_map(|(sym_default, pct, sym_heap)| {
-                    self.symbolize(symex, size, &pct, &sym_heap).into_iter().map(|(sym_size, pct, mut sym_heap)| {
+                self.symbolize(symex, default_value, pct, sym_heap).into_par_iter().flat_map(|(sym_default, pct, sym_heap)| {
+                    self.symbolize(symex, size, &pct, &sym_heap).into_par_iter().map(|(sym_size, pct, mut sym_heap)| {
                         let ptr = sym_heap.new_ptr();
                         // Must be Expr, typechecking would've caught this otherwise.
                         let sym_size = sym_size.into_expr().unwrap();
@@ -314,8 +316,8 @@ impl SymbolicStore {
         }
     }
 
-    fn assign(&self, symex: &mut SymbolicExecutor, var: &str, exp: &Expr, pct: &PathConstraint, sym_heap: &SymbolicHeap) -> Vec<(SymbolicStore, PathConstraint, SymbolicHeap)> {
-        self.symbolize(symex, exp, pct, sym_heap).into_iter().map(|(val, pct, sym_heap)| {
+    fn assign(&self, symex: &Arc<SymbolicExecutor>, var: &str, exp: &Expr, pct: &PathConstraint, sym_heap: &SymbolicHeap) -> Vec<(SymbolicStore, PathConstraint, SymbolicHeap)> {
+        self.symbolize(symex, exp, pct, sym_heap).into_par_iter().map(|(val, pct, sym_heap)| {
             let mut new_store = self.clone();
             new_store.0.insert(var.to_string(), val);
             (new_store, pct, sym_heap)
@@ -354,7 +356,7 @@ impl Display for SymbolicStore {
     }
 }
 
-pub fn run_symbolic_execution(prog: Program) -> SymbolicExecutor {
+pub fn run_symbolic_execution(prog: Program) -> Arc<SymbolicExecutor> {
     let mut store = SymbolicStore(HashMap::new());
     let mut pct = Expr::BoolLit(true);
 
@@ -364,12 +366,12 @@ pub fn run_symbolic_execution(prog: Program) -> SymbolicExecutor {
         store.insert(a.elem.0.clone(), SymbolicValue::Expr(Expr::Var(a.clone())));
     }
 
-    let mut symex = SymbolicExecutor {
-        unreachable_paths: HashMap::new(),
-        testcases: HashMap::new(),
+    let mut symex = Arc::new(SymbolicExecutor {
+        unreachable_paths: Mutex::new(HashMap::new()),
+        testcases: Mutex::new(HashMap::new()),
         prog,
-        function_invocations: HashMap::new(),
-    };
+        function_invocations: Mutex::new(HashMap::new()),
+    });
 
     let sym_heap = SymbolicHeap(HashMap::new());
 
@@ -413,15 +415,15 @@ pub static RECURSION_LIMIT: usize = 5;
 
 // TODO: because of mutable self, we will probably need to clone functions very often. Wasteful.
 pub struct SymbolicExecutor {
-    pub unreachable_paths: HashMap<Loc, Model>,
-    pub testcases: HashMap<Loc, Vec<Model>>,
+    pub unreachable_paths: Mutex<HashMap<Loc, Model>>,
+    pub testcases: Mutex<HashMap<Loc, Vec<Model>>>,
     pub prog: Program,
-    pub function_invocations: HashMap<(Loc, String), usize>,
+    pub function_invocations: Mutex<HashMap<(Loc, String), usize>>,
 }
 
 impl SymbolicExecutor {
     // returns list of pct and return values
-    fn run_func(&mut self, func: &FuncDef, args: Vec<SymbolicValue>, pct: &Expr, sym_heap: &SymbolicHeap) -> Vec<(PathConstraint, SymbolicHeap, Option<SymbolicValue>)> {
+    fn run_func(self: &Arc<Self>, func: &FuncDef, args: Vec<SymbolicValue>, pct: &Expr, sym_heap: &SymbolicHeap) -> Vec<(PathConstraint, SymbolicHeap, Option<SymbolicValue>)> {
         // if satisfiable(pct).is_unsat() {
         //     // println!("PCT {} is not satisfiable", pct);
         //     return vec![];
@@ -429,16 +431,16 @@ impl SymbolicExecutor {
 
         let mut new_store = SymbolicStore(HashMap::new());
 
-        let recs_prev = self.function_invocations.clone();
+        let recs_prev = self.function_invocations.lock().unwrap().clone();
 
         // The reason we modify here, is because only for the current function scope do we want to increase
         // the recursion depth. if we do it outside, then we're changing the depth ("the no. of times we called the function")
         // for all paths.
         // TODO: improve Loc stuff here
-        if *self.function_invocations.entry((WL::no_loc(()).loc, func.name.to_string())).or_insert(0) >= RECURSION_LIMIT {
+        if *self.function_invocations.lock().unwrap().entry((WL::no_loc(()).loc, func.name.to_string())).or_insert(0) >= RECURSION_LIMIT {
             return vec![];
         }
-        *self.function_invocations.get_mut(&(WL::no_loc(()).loc, func.name.to_string())).unwrap() += 1;
+        *self.function_invocations.lock().unwrap().get_mut(&(WL::no_loc(()).loc, func.name.to_string())).unwrap() += 1;
 
         for (i, (v, _)) in func.params.iter().enumerate() {
             new_store.insert(v.elem.0.clone(), args[i].clone());
@@ -453,13 +455,13 @@ impl SymbolicExecutor {
         // println!("{}\n", &paths.len());
 
         // Need to restore function invocations - we count "recursion-depth", not how many times we call a function in total.
-        self.function_invocations = recs_prev;
+        *self.function_invocations.lock().unwrap() = recs_prev;
 
         paths.into_iter().map(|(_, pct, sym_heap, retval)| (pct, sym_heap, retval)).collect()
     }
 
     // Returns the set of all possible exiting paths
-    fn run_block(&mut self, block: &Block, store: &SymbolicStore, pct: &PathConstraint, sym_heap: &SymbolicHeap, ret_val: &Option<SymbolicValue>) -> Vec<(SymbolicStore, PathConstraint, SymbolicHeap, Option<SymbolicValue>)> {
+    fn run_block(self: &Arc<Self>, block: &Block, store: &SymbolicStore, pct: &PathConstraint, sym_heap: &SymbolicHeap, ret_val: &Option<SymbolicValue>) -> Vec<(SymbolicStore, PathConstraint, SymbolicHeap, Option<SymbolicValue>)> {
         // If in this path we have already returned, then we can just break out.
         if let Some(ret_val) = ret_val {
             // println!("already returned {}", ret_val);
@@ -478,7 +480,7 @@ impl SymbolicExecutor {
         block.0.iter().fold(
             vec![(store.clone(), pct.clone(), sym_heap.clone(), ret_val.clone())],
             |paths, stmt| {
-                paths.into_iter().map(|(store, pct, sym_heap, ret_val)| {
+                paths.into_par_iter().map(|(store, pct, sym_heap, ret_val)| {
                     if ret_val.is_some() {
                         // Already returned, so we short-circuit
                         // println!("already returned before execing {} : {}", stmt.clone(), retval.clone().unwrap());
@@ -486,11 +488,12 @@ impl SymbolicExecutor {
                     }
                     self.run_stmt(stmt, &store, &pct, &sym_heap, &ret_val)
                 }).flatten().collect::<Vec<_>>()
+                // }).collect::<Vec<_>>()
             }
         )
     }
 
-    fn run_stmt(&mut self, stmt: &WithLoc<Stmt>, store: &SymbolicStore, pct: &PathConstraint, sym_heap: &SymbolicHeap, ret_val: &Option<SymbolicValue>) -> Vec<(SymbolicStore, PathConstraint, SymbolicHeap, Option<SymbolicValue>)> {
+    fn run_stmt(self: &Arc<Self>, stmt: &WithLoc<Stmt>, store: &SymbolicStore, pct: &PathConstraint, sym_heap: &SymbolicHeap, ret_val: &Option<SymbolicValue>) -> Vec<(SymbolicStore, PathConstraint, SymbolicHeap, Option<SymbolicValue>)> {
         match &stmt.elem {
             Stmt::IfElse { cond, if_branch, else_branch } => {
                 store.symbolize(self, cond, pct, sym_heap).into_iter().flat_map(|(cond_symb, pct, sym_heap)| {
@@ -542,7 +545,7 @@ impl SymbolicExecutor {
             Stmt::While { .. } => panic!("While should have been removed in loop bounding"),
             Stmt::Call(name, args) if name.as_str() == "assume!" => {
                 // assume! has one arg
-                store.symbolize(self, &args[0], pct, sym_heap).into_iter().map(|(sym_arg, pct, sym_heap)| {
+                store.symbolize(self, &args[0], pct, sym_heap).into_par_iter().map(|(sym_arg, pct, sym_heap)| {
                     let new_pct = Expr::BinOp(
                         WL::no_loc(BinOpcode::And),
                         Box::new(WL::no_loc(pct)),
@@ -557,7 +560,7 @@ impl SymbolicExecutor {
                     return args.iter().fold(
                         vec![(store.clone(), pct.clone(), sym_heap.clone(), ret_val.clone())],
                         |acc, arg| {
-                            acc.into_iter().flat_map(|(store, pct, sym_heap, ret_val)| {
+                            acc.into_par_iter().flat_map(|(store, pct, sym_heap, ret_val)| {
                                 store.symbolize(self, arg, &pct, &sym_heap).into_iter().map(|(sym_arg, pct, sym_heap)| {
                                     (store.clone(), pct, sym_heap, ret_val.clone())
                                 }).collect::<Vec<_>>()
@@ -577,16 +580,16 @@ impl SymbolicExecutor {
                 let satres = satisfiable(&pct);
                 if let SatResult::Sat(mut model) = satres {
                     // println!("sat: {:?}, {:?}", &model.0, &model.1);
-                    self.testcases.entry(stmt.loc).or_insert(Vec::new()).push(model);
+                    self.testcases.lock().unwrap().entry(stmt.loc).or_insert(Vec::new()).push(model);
                 }
                 vec![(store.clone(), pct.clone(), sym_heap.clone(), ret_val.clone())]
             }
             Stmt::Unreachable() => {
-                if !self.unreachable_paths.contains_key(&stmt.loc) {
+                if !self.unreachable_paths.lock().unwrap().contains_key(&stmt.loc) {
                     // If we already have a model for an unreachable! we don't need to compute again
                     let satres = satisfiable(&pct);
                     if let SatResult::Sat(model) = satres{
-                        self.unreachable_paths.insert(stmt.loc, model);
+                        self.unreachable_paths.lock().unwrap().insert(stmt.loc, model);
                     }
                 }
 
@@ -607,13 +610,15 @@ impl SymbolicExecutor {
         }
     }
 
-    fn run_call<F, T>(&mut self, name: &str, args: &Vec<WithLoc<Expr>>, store: &SymbolicStore, pct: &PathConstraint, sym_heap: &SymbolicHeap, f: F) -> Vec<T>
-    where F: Fn(PathConstraint, SymbolicHeap, Option<SymbolicValue>) -> T
+    fn run_call<F, T>(self: &Arc<Self>, name: &str, args: &Vec<WithLoc<Expr>>, store: &SymbolicStore, pct: &PathConstraint, sym_heap: &SymbolicHeap, f: F) -> Vec<T>
+    where
+        F: Fn(PathConstraint, SymbolicHeap, Option<SymbolicValue>) -> T + Sync,
+        T: Send
     {
         let symbolized_args: Vec<(Vec<SymbolicValue>, PathConstraint, SymbolicHeap)> = args.iter().fold(vec![(vec![], pct.clone(), sym_heap.clone())], |mut acc, arg| {
             // transform each path in acc into N paths that have the current argument added
-            acc.into_iter().flat_map(|(args, pct, sym_heap)| {
-                store.symbolize(self, arg, &pct, &sym_heap).into_iter().map(|(arg_val, pct, sym_heap)| {
+            acc.into_par_iter().flat_map(|(args, pct, sym_heap)| {
+                store.symbolize(self, arg, &pct, &sym_heap).into_par_iter().map(|(arg_val, pct, sym_heap)| {
                     let mut args = args.clone();
                     args.push(arg_val);
                     (args, pct, sym_heap)
@@ -621,8 +626,8 @@ impl SymbolicExecutor {
             }).collect()
         });
 
-        symbolized_args.into_iter().flat_map(|(args, pct, sym_heap)| {
-            self.run_func(&self.prog.find_funcdef(name).unwrap().clone(), args, &pct, &sym_heap).into_iter().map(|(pct, sym_heap, ret_val)| {
+        symbolized_args.into_par_iter().flat_map(|(args, pct, sym_heap)| {
+            self.run_func(&self.prog.find_funcdef(name).unwrap().clone(), args, &pct, &sym_heap).into_par_iter().map(|(pct, sym_heap, ret_val)| {
                 f(pct, sym_heap, ret_val)
             }).collect::<Vec<_>>()
         }).collect()
@@ -665,23 +670,25 @@ impl SymbolicExecutor {
 
     See the tag "symex-buggy-run-index" to see this for yourself.
      */
-    fn run_index<F, T, G, U>(&mut self, arr: &Expr, idx: &Expr, store: &SymbolicStore, pct: &PathConstraint, sym_heap: &SymbolicHeap, prior_fn: G, f: F)
+    fn run_index<F, T, G, U>(self: &Arc<Self>, arr: &Expr, idx: &Expr, store: &SymbolicStore, pct: &PathConstraint, sym_heap: &SymbolicHeap, prior_fn: G, f: F)
         -> Vec<T>
         where
             // TODO: Adjust Vec<T>? maybe IntoIter?
             // takes symex, sym_arr, sym_idx, pct, sym_heap
-            F: Fn(&mut Self, usize, &Expr, &PathConstraint, &SymbolicHeap, &U) -> Vec<T>,
+            F: Fn(&Arc<Self>, usize, &Expr, &PathConstraint, &SymbolicHeap, &U) -> Vec<T> + Sync,
             // takes symex, pct, sym_heap and returns something that will be used prior to indexing (i.e. the sym_idx passed to f is from prior_fn's returned SymbolicHeaps
-            G: Fn(&mut Self, PathConstraint, SymbolicHeap) -> Vec<(PathConstraint, SymbolicHeap, U)>,
+            G: Fn(&Arc<Self>, PathConstraint, SymbolicHeap) -> Vec<(PathConstraint, SymbolicHeap, U)> + Sync,
+            T: Send,
+            U: Send + Sync,
     {
-        store.symbolize(self, arr, pct, sym_heap).into_iter().flat_map(|(sym_arr, pct, sym_heap)| {
+        store.symbolize(self, arr, pct, sym_heap).into_par_iter().flat_map(|(sym_arr, pct, sym_heap)| {
             // 1. sym_arr must be heap_ptr.
             let sym_arr = sym_arr.into_heap_ptr().unwrap();
-            store.symbolize(self, idx, &pct, &sym_heap).into_iter().flat_map(|(sym_idx, pct, sym_heap)| {
+            store.symbolize(self, idx, &pct, &sym_heap).into_par_iter().flat_map(|(sym_idx, pct, sym_heap)| {
                 // 2. sym_idx must be an Expr.
                 let sym_idx = sym_idx.into_expr().unwrap();
 
-                prior_fn(self, pct, sym_heap).into_iter().flat_map(|(pct, sym_heap, data)| {
+                prior_fn(self, pct, sym_heap).into_par_iter().flat_map(|(pct, sym_heap, data)| {
                     // TODO: additionally assume out of bounds, see if that's satisfiable, if so throw warning
 
                     // TODO: check out of bounds?
@@ -696,7 +703,7 @@ impl SymbolicExecutor {
                                 _ => {}
                             }
 
-                            els.into_iter().enumerate().flat_map(|(idx, el)| {
+                            els.into_par_iter().enumerate().flat_map(|(idx, el)| {
                                 // Maybe factor this out into an Index enum that is either constant, for explicit arrays, or an Expr, for default arrays?
                                 let idx_exp = Expr::IntLit(idx as i64);
 
