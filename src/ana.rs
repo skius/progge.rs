@@ -69,7 +69,6 @@ impl Analyzer {
             Testcase() => {
                 // Warning, recommend unreachable! directive instead
                 if self.is_unreachable(&s.loc) {
-                    // TODO: Warning
                     // TODO: factor out "expression is unreachable" warning
                     Report::build(ariadne::ReportKind::Warning, src_file, loc.start)
                         .with_label(
@@ -211,26 +210,29 @@ impl Analyzer {
                 }
 
                 // Otherwise, we have no proof, throw warning with Abstract state if that exists, perhaps
-                let mut warning_message = format!("statement may be reachable");
-                if let Some((ai, _)) = &self.ai {
-                    if let Some(state) = ai.unreachable_states.get(&s.loc) {
-                        warning_message = format!(
-                            "statement may be reachable - state is {}",
-                            state.to_string(&ai.man, &ai.env).fg(Color::Cyan)
-                        )
+                // TODO: decide if this needs verbose? it seems like an important warning, but maybe too many false positives?
+                if self.verbose || true {
+                    let mut warning_message = format!("statement may be reachable");
+                    if let Some((ai, _)) = &self.ai {
+                        if let Some(state) = ai.unreachable_states.get(&s.loc) {
+                            warning_message = format!(
+                                "statement may be reachable - state is {}",
+                                state.to_string(&ai.man, &ai.env).fg(Color::Cyan)
+                            )
+                        }
                     }
-                }
-                Report::build(ariadne::ReportKind::Warning, src_file, loc.start)
-                    .with_label(
-                        Label::new(
-                            (src_file, loc.range())
+                    Report::build(ariadne::ReportKind::Warning, src_file, loc.start)
+                        .with_label(
+                            Label::new(
+                                (src_file, loc.range())
+                            )
+                                .with_message(warning_message)
+                                .with_color(Color::Yellow)
                         )
-                            .with_message(warning_message)
-                            .with_color(Color::Yellow)
-                    )
-                    .finish()
-                    .print((src_file, Source::from(src.clone())))
-                    .unwrap();
+                        .finish()
+                        .print((src_file, Source::from(src.clone())))
+                        .unwrap();
+                }
             }
             IfElse { cond: _cond, if_branch, else_branch } => {
                 self.analyze_block(if_branch);
