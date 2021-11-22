@@ -547,9 +547,9 @@ impl SymbolicExecutor {
                 // assume! has one arg
                 store.symbolize(self, &args[0], pct, sym_heap).into_par_iter().filter_map(|(sym_arg, pct, sym_heap)| {
                     let assmpt = sym_arg.into_expr().unwrap();
-                    if satisfiable(&assmpt).is_unsat() {
-                        return None;
-                    }
+                    // if satisfiable(&assmpt).is_unsat() {
+                    //     return None;
+                    // }
                     let new_pct = Expr::BinOp(
                         WL::no_loc(BinOpcode::And),
                         Box::new(WL::no_loc(pct)),
@@ -1012,11 +1012,11 @@ fn call_fv(e: &Expr) -> HashSet<(String, Expr)> {
                     acc.extend(fv);
                     acc
                 });
-            let args = if let Some(i) = simplify_int(&args[0]) {
-                WL::no_loc(vec![WL::no_loc(Expr::IntLit(i))])
-            } else { args.clone() };
-            let call = Expr::Call(name.clone(), args);
-            res.insert((call.to_string(), call));
+            // let args = if let Some(i) = simplify_int(&args[0]) {
+            //     WL::no_loc(vec![WL::no_loc(Expr::IntLit(i))])
+            // } else { args.clone() };
+            // let call = Expr::Call(name.clone(), args);
+            res.insert((c.to_string(), c.clone()));
             res.extend(arg_calls);
             res
         }
@@ -1179,7 +1179,7 @@ fn expr_to_z3_int<'a>(ctx: &'a Context, exp: &Expr) -> z3::ast::Int<'a> {
 
 // loop bounding
 
-pub static UNROLL_FACTOR: usize = 9;
+pub static UNROLL_FACTOR: usize = 8;
 
 type WL<T> = WithLoc<T>;
 
