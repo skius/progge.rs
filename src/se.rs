@@ -545,13 +545,17 @@ impl SymbolicExecutor {
             Stmt::While { .. } => panic!("While should have been removed in loop bounding"),
             Stmt::Call(name, args) if name.as_str() == "assume!" => {
                 // assume! has one arg
-                store.symbolize(self, &args[0], pct, sym_heap).into_par_iter().map(|(sym_arg, pct, sym_heap)| {
+                store.symbolize(self, &args[0], pct, sym_heap).into_par_iter().filter_map(|(sym_arg, pct, sym_heap)| {
+                    let assmpt = sym_arg.into_expr().unwrap();
+                    if satisfiable(&assmpt).is_unsat() {
+                        return None;
+                    }
                     let new_pct = Expr::BinOp(
                         WL::no_loc(BinOpcode::And),
                         Box::new(WL::no_loc(pct)),
-                        Box::new(WL::no_loc(sym_arg.into_expr().unwrap())),
+                        Box::new(WL::no_loc(assmpt)),
                     );
-                    (store.clone(), new_pct, sym_heap, ret_val.clone())
+                    Some((store.clone(), new_pct, sym_heap, ret_val.clone()))
                 }).collect()
             }
             Stmt::Call(name, args) => {
@@ -969,10 +973,38 @@ pub fn satisfiable(pct: &Expr) -> SatResult {
     res
 }
 
+fn simplify_int(e: &Expr) -> Option<i64> {
+    match e {
+        Expr::IntLit(i) => Some(*i),
+        Expr::BinOp(op, left, right) => {
+            let left = simplify_int(left)?;
+            let right = simplify_int(right)?;
+            let res = match &op.elem {
+                BinOpcode::Add => left + right,
+                BinOpcode::Sub => left - right,
+                BinOpcode::Mul => left * right,
+                BinOpcode::Div => left / right,
+                // TODO: rem_euclid?
+                BinOpcode::Mod => left % right,
+                _ => return None,
+            };
+            Some(res)
+        }
+        Expr::UnOp(op, inner) => {
+            let inner = simplify_int(inner)?;
+            match &op.elem {
+                UnOpcode::Neg => Some(-inner),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 fn call_fv(e: &Expr) -> HashSet<(String, Expr)> {
     let mut res = HashSet::new();
     match e {
-        c@Expr::Call(_, args) => {
+        c@Expr::Call(name, args) => {
             // TODO: Assuming int_arg
             let arg_calls = args.elem.iter()
                 .map(|arg| call_fv(arg))
@@ -980,7 +1012,11 @@ fn call_fv(e: &Expr) -> HashSet<(String, Expr)> {
                     acc.extend(fv);
                     acc
                 });
-            res.insert((c.to_string(), c.clone()));
+            let args = if let Some(i) = simplify_int(&args[0]) {
+                WL::no_loc(vec![WL::no_loc(Expr::IntLit(i))])
+            } else { args.clone() };
+            let call = Expr::Call(name.clone(), args);
+            res.insert((call.to_string(), call));
             res.extend(arg_calls);
             res
         }
@@ -1143,7 +1179,7 @@ fn expr_to_z3_int<'a>(ctx: &'a Context, exp: &Expr) -> z3::ast::Int<'a> {
 
 // loop bounding
 
-pub static UNROLL_FACTOR: usize = 5;
+pub static UNROLL_FACTOR: usize = 9;
 
 type WL<T> = WithLoc<T>;
 
