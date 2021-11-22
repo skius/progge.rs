@@ -1,0 +1,73 @@
+// Note: needs an unroll factor of at least 8
+// https://www.mathsisfun.com/chicken_crossing_solution.html
+fn analyze() {
+    // The location of the four things represented as booleans - false means on the original side of the river,
+    // true means on the destination side.
+    let fox_loc = false;
+    let chicken_loc = false;
+    let corn_loc = false;
+    let farmer_loc = false;
+
+    let i = 0;
+
+    while i < 20 {
+        // fox and chicken cannot be alone
+        assume!(!((fox_loc && chicken_loc && !farmer_loc) || (!fox_loc && !chicken_loc && farmer_loc)));
+        // chicken and corn cannot be alone
+        assume!(!((corn_loc && chicken_loc && !farmer_loc) || (!corn_loc && !chicken_loc && farmer_loc)));
+
+        if fox_loc && chicken_loc && corn_loc && farmer_loc {
+            // Some output to look out for in the compiled program for us humans, not used by symbolic execution
+            let _ = print_int(42);
+            testcase!;
+        }
+
+        // Sample which item to take with us
+        let change_fox = int_arg(3 * i);
+        let change_chicken = int_arg(3 * i + 1);
+        let change_corn = int_arg(3 * i + 2);
+
+        assume!(0 <= change_fox && change_fox <= 1);
+        assume!(0 <= change_chicken && change_chicken <= 1);
+        assume!(0 <= change_corn && change_corn <= 1);
+
+        // Can only change one thing
+        assume!(change_fox + change_chicken + change_corn <= 1);
+
+        if change_fox == 1 {
+            // fox must be on farmer's side
+            assume!(fox_loc && farmer_loc || !fox_loc && !farmer_loc);
+            fox_loc = !fox_loc;
+        }
+        if change_chicken == 1 {
+            // chicken must be on farmer's side
+            assume!(chicken_loc && farmer_loc || !chicken_loc && !farmer_loc);
+            chicken_loc = !chicken_loc;
+        }
+        if change_corn == 1 {
+            // corn must be on farmer's side
+            assume!(corn_loc && farmer_loc || !corn_loc && !farmer_loc);
+            corn_loc = !corn_loc;
+        }
+        farmer_loc = !farmer_loc;
+
+        i = i + 1;
+    }
+
+    return;
+}
+
+/*
+Performance (i7 4770k HT, WSL2, dev build):
+(parallel uses call_fv pretty-printing)
+loop unroll factor of 9:
+sequential: 6min
+parallel: 3.5min
+parallel with assume!(unsat) optimisation: 3.5min
+
+loop unroll factor of 8:
+sequential: 2min10s
+parallel: 1min30s
+parallel without call_fv pretty-printing: 1min12s
+*/
+
