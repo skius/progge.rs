@@ -3,6 +3,7 @@ pub mod ana;
 pub mod ast;
 pub mod dfa;
 pub mod liveness;
+pub mod assign_liveness;
 pub mod constprop;
 pub mod se;
 pub mod ir;

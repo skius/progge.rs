@@ -65,10 +65,10 @@ fn main() -> Result<(), TcError> {
     analyzer.analyze();
 
     let analyze = IntraProcCFG::from(&**prog.find_funcdef("analyze").unwrap());
-    liveness::run(analyze);
+    let out_flows = liveness::run(analyze);
 
-    let analyze = IntraProcCFG::from(&**prog.find_funcdef("analyze").unwrap());
-    constprop::run(analyze);
+    // let analyze = IntraProcCFG::from(&**prog.find_funcdef("analyze").unwrap());
+    constprop::run(prog.find_funcdef("analyze").unwrap().clone().elem);
 
 
     if let Some(output) = config.compile_target {

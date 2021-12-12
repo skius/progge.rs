@@ -1,4 +1,4 @@
-// TODO: perhaps extract all the various analyses into a separate module?
+// TODO: how to share more between liveness and assign_liveness?
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
@@ -74,7 +74,9 @@ fn gen(node: &IRNode) -> HashSet<Var> {
                     res.extend(src.free_vars());
                     res.extend(idx.free_vars());
                 }
-                _ => {},
+                LocExpr::Var(v) => {
+                    res.insert(v.elem.clone());
+                },
             }
             res
         }
@@ -95,15 +97,12 @@ fn kill(node: &IRNode) -> HashSet<Var> {
     let mut res = HashSet::new();
     match node {
         IRNode::IRDecl(v, _) => HashSet::from([v.clone()]),
-        IRNode::IRAssn(LocExpr::Var(v), _) => HashSet::from([v.elem.clone()]),
+        // IRNode::IRAssn(LocExpr::Var(v), _) => HashSet::from([v.elem.clone()]),
         _ => res,
     }
 }
 
 pub fn run(cfg: IntraProcCFG) -> HashMap<NodeIndex, Fact> {
-    // TODO: perhaps provide generic adaptor in IntraProcCFG for data-flow analyses?
-    // would have forward/backwards and may/must over some set over generic T
-
     let graph = Graph(cfg);
 
     let flow = |node: NodeIndex, fact: Fact, _prev_fact: &Fact| -> HashSet<Var> {
@@ -116,6 +115,8 @@ pub fn run(cfg: IntraProcCFG) -> HashMap<NodeIndex, Fact> {
         let live = live.difference(&kill).cloned().collect::<HashSet<_>>();
         let live = live.union(&gen).cloned().collect::<HashSet<_>>();
 
+        // println!("Flowing through {:?}", node);
+        //
         // We forward (remember backwards, so our input fact comes from our successors and we compute what we pass
         // onwards to our predecessors) the set: GEN + (LIVE - KILL)
 
