@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 
 use elina::ast::{Abstract, Environment, Hcons, Interval, Manager, OptPkManager, Texpr, TexprBinop, TexprUnop};
+use petgraph::Direction;
 use petgraph::dot::{Config, Dot};
 use petgraph::graph::{EdgeIndex, EdgeReference, NodeIndex};
 use petgraph::prelude::Dfs;
@@ -10,8 +11,53 @@ use petgraph::Direction::{Incoming, Outgoing};
 
 use crate::ast::{BinOpcode, Loc, Type, Var};
 use crate::ast::{LocExpr, Expr, UnOpcode, WithLoc};
+use crate::dfa;
 use crate::ir::{IREdge, IRNode, IntraProcCFG};
 use crate::ir::IRNode::IRReturn;
+
+struct AIGraph<M: Manager>(AbstractInterpretationEnvironment<M>);
+
+impl<M: Manager> dfa::Graph for AIGraph<M> {
+    type Node = NodeIndex;
+    type Edge = EdgeIndex;
+
+    fn succs(&self, node: Self::Node) -> Vec<Self::Node> {
+        self.0.cfg.graph.neighbors_directed(node, Direction::Outgoing).collect()
+    }
+
+    fn preds(&self, node: Self::Node) -> Vec<Self::Node> {
+        self.0.cfg.graph.neighbors_directed(node, Direction::Incoming).collect()
+    }
+
+    fn edge_between(&self, from: Self::Node, to: Self::Node) -> Option<Self::Edge> {
+        self.0.cfg.graph.edges_connecting(from, to).next().map(|e| e.id())
+    }
+
+    fn entry_nodes(&self) -> HashSet<Self::Node> {
+        HashSet::from([self.0.cfg.entry])
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct Fact(Abstract);
+
+impl<M: Manager> dfa::Fact<AIGraph<M>> for Fact {
+    fn merge<'a>(graph: &AIGraph<M>, facts: impl IntoIterator<Item=&'a Self>) -> Self where Self: 'a {
+        let mut res = Abstract::bottom(&graph.0.man, &graph.0.env);
+
+        for fact in facts.into_iter() {
+            res.join(&graph.0.man, &fact.0)
+        }
+
+        Fact(res)
+    }
+
+    fn bottom(graph: &AIGraph<M>) -> Self {
+        Fact(Abstract::bottom(&graph.0.man, &graph.0.env))
+    }
+}
+
+
 
 // TODO: to counteract bool_vars causing imprecisions, add (optional) preprocessing step
 // that tries to inline all uses of bool vars. needs other static analyses first
@@ -84,54 +130,6 @@ impl<M: Manager> AbstractInterpretationEnvironment<M> {
     }
 }
 
-// pub fn graphviz_with_states<M: Manager>(
-//     cfg: &IntraProcCFG,
-//     man: &M,
-//     env: &Environment,
-//     state_map: &HashMap<EdgeIndex, Abstract>,
-// ) -> String {
-//     let edge_getter = |_, edge: EdgeReference<IREdge>| {
-//         let mut intervals = "".to_owned();
-
-//         if !state_map[&edge.id()].is_bottom(man) {
-//             let mut vars = env.keys().map(|v| v.as_str()).collect::<Vec<_>>();
-//             vars.sort();
-//             for v in vars {
-//                 intervals += &format!(
-//                     "{}: {:?}\\n",
-//                     v,
-//                     state_map[&edge.id()].get_bounds(man, env, v)
-//                 );
-//             }
-//         }
-
-//         let abs_string = state_map[&edge.id()].to_string(man, env);
-
-//         let color = match edge.weight() {
-//             IREdge::Fallthrough => "black",
-//             IREdge::Taken => "green",
-//             IREdge::NotTaken => "red",
-//         };
-
-//         format!(
-//             "label = \"{}\\n{}\\n{}\" color = {}",
-//             *edge.weight(),
-//             abs_string,
-//             intervals,
-//             color
-//         )
-//     };
-//     let node_getter = |_, _| format!("");
-
-//     let dot = Dot::with_attr_getters(
-//         &cfg.graph,
-//         &[Config::EdgeNoLabel],
-//         &edge_getter,
-//         &node_getter,
-//     );
-//     format!("{}", dot)
-// }
-
 pub static RETURN_VAR: &'static str = "@RETURN@";
 
 fn env_from_cfg(cfg: &IntraProcCFG) -> Environment {
@@ -173,7 +171,7 @@ pub fn run<M: Default + Manager>(cfg: IntraProcCFG) -> AbstractInterpretationEnv
     };
 
     // TODO: enforce .run() better? maybe make AIE::run() private and keep ai::run() public?
-    res.run();
+    let res = res.run();
 
     res
 }
@@ -191,115 +189,55 @@ impl<M: Manager> AbstractInterpretationEnvironment<M> {
     }
 
     /// This function returns a map from each edge to the abstract state at that edge.
-    pub fn run(&mut self) {
-        let entry = self.cfg.entry;
-        let man = &self.man;
-        let env = &self.env;
-
-        let mut prev_state_of_nodes: HashMap<NodeIndex, Abstract> = HashMap::new();
+    pub fn run(mut self) -> Self {
+        let mut saved_states = self.saved_states.clone();
+        let mut unreachable_states = self.unreachable_states.clone();
         let mut node_encounters: HashMap<NodeIndex, usize> = HashMap::new();
-
-        for edge in self.cfg.graph.edge_indices() {
-            self.edge_state_map.insert(edge, Abstract::bottom(man, env));
-        }
         for node in self.cfg.graph.node_indices() {
-            prev_state_of_nodes.insert(node, Abstract::bottom(man, env));
             node_encounters.insert(node, 0);
         }
 
-        // let entry_outs = self.cfg.graph
-        //     .edges_directed(entry, Outgoing)
-        //     .map(|e| e.id())
-        //     .collect::<Vec<_>>();
+        let mut dfa_g = AIGraph(self);
 
-        // for entry_out in &entry_outs {
-        //     self.edge_state_map.insert(*entry_out, Abstract::top(man, env));
-        // }
+        let flow = |node: NodeIndex, fact: Fact, prev_fact: &Fact| {
+            let mut curr_state = fact.0;
 
-        prev_state_of_nodes.insert(entry, Abstract::top(man, env));
+            *node_encounters.get_mut(&node).unwrap() += 1;
+            if node_encounters[&node] > WIDENING_THRESHOLD {
+                curr_state = prev_fact.0.widen_copy(&dfa_g.0.man, &curr_state);
+            }
 
-        let mut worklist = VecDeque::new();
-        worklist.push_back(entry);
+            let curr_irnode = dfa_g.0.cfg.graph[node].clone();
+            let taken_state = handle_irnode(&dfa_g.0.man, &dfa_g.0.env, &curr_irnode, &mut curr_state, &mut saved_states, &mut unreachable_states);
+            (curr_state, taken_state)
+        };
 
-        while !worklist.is_empty() {
-            let curr_node = worklist.pop_front().unwrap();
-
-            let incoming_states = self.cfg.graph
-                .edges_directed(curr_node, Incoming)
-                .map(|e| &self.edge_state_map[&e.id()])
-                .collect::<Vec<_>>();
-
-            let prev_state = &prev_state_of_nodes[&curr_node];
-
-            let mut curr_state = if curr_node == entry {
-                Abstract::top(man, env)
-            } else {
-                let mut curr_state = Abstract::bottom(man, env);
-                for state in &incoming_states {
-                    // TODO: add join &[Abstract] to elina?
-                    curr_state.join(man, *state);
-                }
-                curr_state
+        let get_succ_fact = |edge: EdgeIndex, (not_taken, taken): &(Abstract, Option<Abstract>)| {
+            let weight = dfa_g.0.cfg.graph.edge_weight(edge).unwrap().clone();
+            let out_state = match weight {
+                IREdge::Fallthrough | IREdge::NotTaken => not_taken.clone(),
+                IREdge::Taken => taken.clone().unwrap(),
             };
 
-            // // Check widening (of course only if we've ever actually done something
-            // if prev_state == &curr_state && node_encounters[&curr_node] > 0 {
-            //     // nothing to do, continue
-            //     continue;
-            // }
-            // prev_state != curr_state
-            *node_encounters.get_mut(&curr_node).unwrap() += 1;
-            if node_encounters[&curr_node] > WIDENING_THRESHOLD {
-                // println!(
-                //     "\n--------\nWIDENING: prev{} and curr{}",
-                //     prev_state.to_string(man, env),
-                //     curr_state.to_string(man, env)
-                // );
-                curr_state = prev_state.widen_copy(man, &curr_state);
-                // println!("WIDENED INTO: {}", curr_state.to_string(man, env));
-            }
-            prev_state_of_nodes.insert(curr_node, curr_state.clone());
+            Fact(out_state)
+        };
 
-            // Need to compute outgoing state
-            let curr_irnode = self.cfg.graph[curr_node].clone();
-            let taken_state = handle_irnode(man, env, &curr_irnode, &mut curr_state, &mut self.saved_states, &mut self.unreachable_states);
+        let (in_flows, edge_flows) = dfa::dfa(
+            &dfa_g,
+            flow,
+            get_succ_fact,
+            &Fact(Abstract::top(&dfa_g.0.man, &dfa_g.0.env))
+        );
 
-            // println!("{}", &curr_state.to_string(&self.man, &self.env));
-            // println!("{:?}", &curr_state.get_bounds(&self.man, &self.env, "i_1"));
+        self = dfa_g.0;
+        self.node_state_map = in_flows.into_iter().map(|(k, v)| (k, v.0)).collect();
+        self.saved_states = saved_states;
+        self.unreachable_states = unreachable_states;
+        self.edge_state_map = edge_flows.into_iter().map(|(e, fact)| {
+            (e, fact.0)
+        }).collect();
 
-            let outgoing_edges = self.cfg.graph
-                .edges_directed(curr_node, Outgoing)
-                // .map(|e| e.id())
-                .collect::<Vec<_>>();
-
-            for out_edge in outgoing_edges {
-                let edge_kind = *out_edge.weight();
-                let out_state = match edge_kind {
-                    IREdge::Fallthrough | IREdge::NotTaken => curr_state.clone(),
-                    IREdge::Taken => {
-                        // curr_node must be CBranch and we must have gotten a Some(taken) result state
-                        taken_state.clone().unwrap()
-                    }
-                };
-
-                // println!(
-                //     "\n-----\nHandling Edge\nold out edge state: {}",
-                //     self.edge_state_map[&out_edge.id()].to_string(man, env)
-                // );
-                // println!("new out_state: {}", out_state.to_string(man, env));
-
-                if self.edge_state_map[&out_edge.id()] == out_state && node_encounters[&out_edge.target()] != 0 {
-                    // we are not causing a change in succ
-                    // (note that we want to visit the succ at least once, hence node_encounters != 0)
-                    continue;
-                }
-                self.edge_state_map.insert(out_edge.id(), out_state);
-                // if old_state != taken_state then add to worklist
-                worklist.push_back(out_edge.target());
-            }
-        }
-
-        self.node_state_map = prev_state_of_nodes;
+        self
     }
 
 }
