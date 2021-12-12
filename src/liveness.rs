@@ -63,6 +63,7 @@ impl Display for Fact {
     }
 }
 
+// TODO: perhaps a "uses" function on IRNode that returns all used variables?
 fn gen(node: &IRNode) -> HashSet<Var> {
     let mut res = HashSet::new();
     match node {
@@ -91,6 +92,7 @@ fn gen(node: &IRNode) -> HashSet<Var> {
     }
 }
 
+// TODO: perhaps a "defines" function on IRNode that returns all defined/reassigned variables?
 fn kill(node: &IRNode) -> HashSet<Var> {
     let mut res = HashSet::new();
     match node {
