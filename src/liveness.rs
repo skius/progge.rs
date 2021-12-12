@@ -42,7 +42,7 @@ impl dfa::Graph for Graph {
 struct Fact(HashSet<Var>);
 
 impl dfa::Fact<Graph> for Fact {
-    fn merge<'a>(graph: &Graph, facts: impl IntoIterator<Item=&'a Self>) -> Self where Self: 'a {
+    fn merge<'a>(_: &Graph, facts: impl IntoIterator<Item=&'a Self>) -> Self where Self: 'a {
         facts.into_iter().fold(Fact(HashSet::new()), |mut acc, fact| {
             acc.0.extend(fact.0.iter().cloned());
             acc
@@ -66,45 +66,32 @@ impl Display for Fact {
 fn gen(node: &IRNode) -> HashSet<Var> {
     let mut res = HashSet::new();
     match node {
-        IRNode::IRTestcase => {res}
-        IRNode::IRUnreachable => {res}
-        IRNode::IRSkip => {res}
-        IRNode::IRDecl(_, exp) => {exp.free_vars()}
-        IRNode::IRAssn(le, exp) => {
+        IRNode::IRDecl(_, exp) => exp.free_vars(),
+        IRNode::IRAssn(LocExpr::Index(src, idx), exp) => {
             let mut res = exp.free_vars();
-            match le {
-                LocExpr::Var(_) => {}
-                LocExpr::Index(src, idx) => {
-                    res.extend(src.free_vars());
-                    res.extend(idx.free_vars());
-                }
-            }
+            res.extend(src.free_vars());
+            res.extend(idx.free_vars());
             res
         }
-        IRNode::IRCall(_, exps) => {exps.iter().fold(HashSet::new(), |mut acc, exp| {acc.extend(exp.free_vars()); acc})}
-        IRNode::IRReturn(exp) => exp.as_ref().map(|e| e.free_vars()).unwrap_or(HashSet::new()),
+        IRNode::IRCall(_, exps) => {
+            exps.iter()
+                .fold(res, |mut acc, exp| {
+                    acc.extend(exp.free_vars());
+                    acc
+                })
+        }
+        IRNode::IRReturn(exp) => exp.as_ref().map(|e| e.free_vars()).unwrap_or(res),
         IRNode::IRCBranch(exp) => exp.free_vars(),
-        IRNode::IRBranch => {res}
+        _ => res,
     }
 }
 
 fn kill(node: &IRNode) -> HashSet<Var> {
     let mut res = HashSet::new();
     match node {
-        IRNode::IRTestcase => {res}
-        IRNode::IRUnreachable => {res}
-        IRNode::IRSkip => {res}
-        IRNode::IRDecl(v, _) => {HashSet::from([v.clone()])}
-        IRNode::IRAssn(s, _) => {
-            match s {
-                LocExpr::Var(v) => {HashSet::from([v.elem.clone()])}
-                LocExpr::Index(_, _) => {res}
-            }
-        }
-        IRNode::IRCall(_, _) => {res}
-        IRNode::IRReturn(_) => res,
-        IRNode::IRCBranch(_) => {res}
-        IRNode::IRBranch => {res}
+        IRNode::IRDecl(v, _) => HashSet::from([v.clone()]),
+        IRNode::IRAssn(LocExpr::Var(v), _) => HashSet::from([v.elem.clone()]),
+        _ => res,
     }
 }
 
