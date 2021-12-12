@@ -2,6 +2,7 @@ pub mod ai;
 pub mod ana;
 pub mod ast;
 pub mod dfa;
+pub mod liveness;
 pub mod se;
 pub mod ir;
 pub mod opt;

@@ -12,6 +12,7 @@ pub trait Graph {
     fn entry_nodes(&self) -> HashSet<Self::Node>;
 }
 
+// TODO: Decide if these functions really need a reference to the graph
 pub trait Fact<G: Graph>: Clone + Eq {
     fn merge<'a>(graph: &G, facts: impl IntoIterator<Item = &'a Self>) -> Self
     where
