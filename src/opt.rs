@@ -169,6 +169,7 @@ fn rules() -> Vec<Rewrite<Progge, ConstantFolding>> { vec![
     rw!("add-0"; "(+ ?x 0)" => "?x"),
     rw!("mul-0"; "(* ?x 0)" => "0"),
     rw!("mul-1"; "(* ?x 1)" => "?x"),
+    rw!("div-1"; "(/ ?x 1)" => "?x"),
     rw!("sub-self"; "(- ?x ?x)" => "0"),
     // rw!("pow-split"; "(^ ?x (+ ?y ?z))" => "(* (^ ?x ?y) (^ ?x ?z))"),
     // rw!("pow-unsplit"; "(* (^ ?x ?y) (^ ?x ?z))" => "(^ ?x (+ ?y ?z))"),
@@ -181,6 +182,9 @@ fn rules() -> Vec<Rewrite<Progge, ConstantFolding>> { vec![
     rw!("eq-sub-1"; "(== (+ ?x ?y) ?z)" => "(== ?x (- ?z ?y))"),
     rw!("eq-sub-2"; "(== (- ?z ?y) ?x)" => "(== ?z (+ ?x ?y))"),
 
+    rw!("and-false-elim"; "(&& ?x false)" => "false"),
+    rw!("or-true-elim"; "(|| ?x true)" => "true"),
+
 
 
     // rw!("eq-elim.general"; "(= (?o ?x ?y) (?o ?x ?z))" => "(= ?y ?z)"), // Not possible currently
@@ -191,6 +195,12 @@ fn is_not_zero(var: &'static str) -> impl Fn(&mut EGraph<Progge, ConstantFolding
     let var = var.parse().unwrap();
     let zero = Progge::Num(0);
     move |egraph, _, subst| !egraph[subst[var]].nodes.contains(&zero)
+}
+
+fn is_false(var: &'static str) -> impl Fn(&mut EGraph<Progge, ConstantFolding>, Id, &Subst) -> bool {
+    let var = var.parse().unwrap();
+    let false_ = Progge::Bool(false);
+    move |egraph, _, subst| egraph[subst[var]].nodes.contains(&false_)
 }
 
 pub fn sexp_of_expr(e: &Expr) -> String {

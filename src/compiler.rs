@@ -145,7 +145,8 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
                         self.builder.build_int_compare(IntPredicate::SGE, left.into_int_value(), right.into_int_value(), "cmptmp").into()
                     }
                     BinOpcode::Eq => {
-                        self.builder.build_int_compare(IntPredicate::EQ, left.into_int_value(), right.into_int_value(), "cmptmp").into()
+                        let v: BasicValueEnum<'ctx> = self.builder.build_int_compare(IntPredicate::EQ, left.into_int_value(), right.into_int_value(), "cmptmp").into();
+                        self.builder.build_int_z_extend_or_bit_cast(v.into_int_value(), self.context.i64_type(), "booltmp").into()
                     }
                     BinOpcode::Ne => {
                         self.builder.build_int_compare(IntPredicate::NE, left.into_int_value(), right.into_int_value(), "cmptmp").into()
@@ -265,19 +266,29 @@ impl<'a, 'ctx> Compiler<'a, 'ctx> {
 
                 let if_bb = self.context.append_basic_block(self.fn_value(), "if_true");
                 let else_bb = self.context.append_basic_block(self.fn_value(), "if_false");
-                let merge_bb = self.context.append_basic_block(self.fn_value(), "if_end");
+                // let merge_bb = self.context.append_basic_block(self.fn_value(), "if_end");
 
                 self.builder.build_conditional_branch(cond, if_bb, else_bb);
 
                 self.builder.position_at_end(if_bb);
-                let returns = self.compile_block(if_branch);
-                if !returns {
-                    self.builder.build_unconditional_branch(merge_bb);
-                }
+                let returns_if = self.compile_block(if_branch);
+
 
                 self.builder.position_at_end(else_bb);
-                let returns = self.compile_block(else_branch);
-                if !returns {
+                let returns_else = self.compile_block(else_branch);
+
+                if returns_if && returns_else {
+                    return;
+                }
+
+                let merge_bb = self.context.append_basic_block(self.fn_value(), "if_end");
+
+                if !returns_if {
+                    self.builder.position_at_end(if_bb);
+                    self.builder.build_unconditional_branch(merge_bb);
+                }
+                if !returns_else {
+                    self.builder.position_at_end(else_bb);
                     self.builder.build_unconditional_branch(merge_bb);
                 }
 

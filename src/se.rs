@@ -411,7 +411,7 @@ pub fn run_symbolic_execution(prog: Program) -> Arc<SymbolicExecutor> {
     symex
 }
 
-pub static RECURSION_LIMIT: usize = 5;
+pub static RECURSION_LIMIT: usize = 3500;
 
 // TODO: because of mutable self, we will probably need to clone functions very often. Wasteful.
 pub struct SymbolicExecutor {
@@ -438,6 +438,7 @@ impl SymbolicExecutor {
         // for all paths.
         // TODO: improve Loc stuff here
         if *self.function_invocations.lock().unwrap().entry((WL::no_loc(()).loc, func.name.to_string())).or_insert(0) >= RECURSION_LIMIT {
+            println!("Reached limit");
             return vec![];
         }
         *self.function_invocations.lock().unwrap().get_mut(&(WL::no_loc(()).loc, func.name.to_string())).unwrap() += 1;
@@ -580,6 +581,8 @@ impl SymbolicExecutor {
             }
             Stmt::Testcase() => {
                 // println!("\ntestcase line{}, \npct: {}\nsym_heap: {}", stmt.loc.line, &pct, &sym_heap);
+
+                println!("Treating testcase");
 
                 let satres = satisfiable(&pct);
                 if let SatResult::Sat(mut model) = satres {
@@ -920,11 +923,15 @@ thread_local! {
 }
 
 pub fn satisfiable(pct: &Expr) -> SatResult {
+    // println!("pct orig: {}", pct);
+
     // let pct_sexp = sexp_of_expr(pct);
     // let pct_egg = pct_sexp.parse().unwrap();
     // println!("pct orig sexp: {}", pct_sexp);
     // let bests = get_bests(vec![&pct_egg]);
     // println!("pct best sexp: {}", bests[0].to_string());
+
+
 
     // Uncomment if you want caching (slower atm) -- update(20-11): seems faster?
     if let Some(model) = cache::satisfiable(pct) {
@@ -937,7 +944,7 @@ pub fn satisfiable(pct: &Expr) -> SatResult {
     let start = SystemTime::now();
 
     let mut cfg = z3::Config::new();
-    cfg.set_timeout_msec(1000);
+    cfg.set_timeout_msec(10000);
 
     let ctx = z3::Context::new(&cfg);
     let solver = z3::Solver::new(&ctx);
@@ -957,8 +964,14 @@ pub fn satisfiable(pct: &Expr) -> SatResult {
             cache::insert(pct, model.clone());
             SatResult::Sat(model)
         },
-        z3::SatResult::Unsat => SatResult::Unsat,
-        z3::SatResult::Unknown => SatResult::Unknown(solver.get_reason_unknown().unwrap()),
+        z3::SatResult::Unsat => {
+            SatResult::Unsat
+        },
+        z3::SatResult::Unknown => {
+            let unknown_reason = solver.get_reason_unknown().unwrap();
+            println!("unknown reason: {}", unknown_reason);
+            SatResult::Unknown(unknown_reason)
+        },
     };
 
     let d = SystemTime::now().duration_since(start).unwrap();
